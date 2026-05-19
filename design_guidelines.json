@@ -1,0 +1,93 @@
+{
+  "theme": "Light",
+  "archetype": "4 - Swiss & High-Contrast",
+  "brand": {
+    "name": "Nosko",
+    "tone": "Reliable, Fast, Modern, Functional, Construction-style Brutalism"
+  },
+  "typography": {
+    "headings": "Cabinet Grotesk",
+    "body": "IBM Plex Sans",
+    "rules": "High contrast weights (Black for headings, Regular for body). Tight tracking for headings (`tracking-tighter`). No generic fonts for display. Use uppercase overlines with heavy tracking (`tracking-[0.2em]`)."
+  },
+  "colors": {
+    "primary": "#FFD600",
+    "background": "#FFFFFF",
+    "text": "#0A0A0A",
+    "accent": "#0A0A0A",
+    "surface": "#F9FAFB",
+    "border": "#E5E7EB",
+    "dark_surface": "#1A1A1A",
+    "success": "#16A34A"
+  },
+  "layout_and_spacing": {
+    "system": "The Bento Grid Protocol. Mode B (Control Room Grid) for Dashboards, Mode A (Tetris Grid) for Landing. Use the Swiss Grid layout, overlapping elements and exposed grid lines.",
+    "spacing": "Generous spacing philosophy (`p-8`, `p-12`). Containers with borders must have internal padding (`p-6` or `p-8`) to prevent text collision. Asymmetry preferred for marketing."
+  },
+  "components": [
+    {
+      "name": "App",
+      "path": "/app/frontend/src/App.js",
+      "instructions": "Main router setup. Includes public routes (Landing), and protected dashboard routes."
+    },
+    {
+      "name": "LandingPage",
+      "path": "/app/frontend/src/pages/LandingPage.js",
+      "instructions": "Public marketing page. Heavy typographic hero section with 'Switch/Outlet Replacement $25' pricing block. Clear CTAs: 'Book Job', 'Become a Handyman', 'Join Marketer Program'. Use `nosko_hero_bg` and real tools/repairing outlet images. Use 'Marquee' for scrolling text like 'FAST REPAIRS - $25 MINIMUM'. Grid borders visible."
+    },
+    {
+      "name": "JobRequestPage",
+      "path": "/app/frontend/src/pages/JobRequestPage.js",
+      "instructions": "Customer job request flow. Minimalist form. Photo upload dropzone (Shadcn customized, sharp corners). Description input. Clear pricing details ($25 base, $25 min) on the side. W9 not needed here."
+    },
+    {
+      "name": "WorkerSignupPage",
+      "path": "/app/frontend/src/pages/WorkerSignupPage.js",
+      "instructions": "Worker onboarding. Collect: hours, skills, location. Include W9 signing section (typed signature + PDF upload dropzone). Brutalist, step-by-step layout."
+    },
+    {
+      "name": "MarketerSignupPage",
+      "path": "/app/frontend/src/pages/MarketerSignupPage.js",
+      "instructions": "Marketer onboarding. Explains 15% profit share. W9 signing section (typed signature + PDF upload). Generates personal code visually."
+    },
+    {
+      "name": "DashboardLayout",
+      "path": "/app/frontend/src/components/layout/DashboardLayout.js",
+      "instructions": "Shared shell for Worker, Marketer, and Admin. Sidebar with clear, high-contrast navigation. Top header with user profile."
+    },
+    {
+      "name": "WorkerDashboard",
+      "path": "/app/frontend/src/pages/WorkerDashboard.js",
+      "instructions": "Dashboard showing earnings metrics (Weekly, Monthly, Yearly) in sharp bento boxes. List of jobs assigned. Minimal, high density grid. No soft shadows."
+    },
+    {
+      "name": "MarketerDashboard",
+      "path": "/app/frontend/src/pages/MarketerDashboard.js",
+      "instructions": "Dashboard showing unique referral link (copy to clipboard), and earnings breakdown chart (Recharts)."
+    },
+    {
+      "name": "AdminDashboard",
+      "path": "/app/frontend/src/pages/AdminDashboard.js",
+      "instructions": "Command center. Tabs: 1. Jobs (View requests + photos), 2. Workers (Pay via Stripe Connect button), 3. Marketers, 4. Portfolio (Upload before/after photos to site)."
+    }
+  ],
+  "visual_enhancers": {
+    "surfaces": "GRID BORDERS (The Technical Look). Expose the skeleton. 1px borders everywhere (`border-collapse`). High contrast black borders on hover.",
+    "buttons": "Sharp corners (`rounded-none`). Hover state: slight lift (`-translate-y-1`), solid black shadow. Primary CTA in `#FFD600`, text `#0A0A0A`.",
+    "icons": "lucide-react (default) with sharp, solid variations when possible."
+  },
+  "image_urls": {
+    "hero_background": "https://static.prod-images.emergentagent.com/jobs/5522244e-207c-4884-a8ae-8054cebf7d37/images/9237dd3c40539c2efaf48c028820ab8d9ed683bda0ca92aae6f1db3253e6838f.png",
+    "hero_texture": "https://static.prod-images.emergentagent.com/jobs/5522244e-207c-4884-a8ae-8054cebf7d37/images/e3a911b26130effc14ef14d715661a300e6c5044e003ecd7d0e1e4b060552a44.png",
+    "worker_repairing": "https://images.unsplash.com/photo-1772338537689-056082f100a9?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwxfHxoYW5keW1hbiUyMHJlcGFpcmluZyUyMG91dGxldHxlbnwwfHx8fDE3NzkyMjQ1Njl8MA&ixlib=rb-4.1.0&q=85",
+    "modern_house": "https://images.pexels.com/photos/7031622/pexels-photo-7031622.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "tools": "https://images.unsplash.com/photo-1584677191047-38f48d0db64e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwyfHxoYW5keW1hbiUyMHRvb2wlMjBib3h8ZW58MHx8fHwxNzc5MjI0NTgxfDA&ixlib=rb-4.1.0&q=85"
+  },
+  "dependencies": [
+    "lucide-react",
+    "framer-motion",
+    "react-router-dom",
+    "recharts",
+    "sonner"
+  ]
+}
