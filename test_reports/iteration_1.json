@@ -1,0 +1,37 @@
+{
+  "summary": "Backend-only testing of Nosko Handyman FastAPI. Seeded test users (customer/worker/marketer/admin) + sessions directly in MongoDB per /app/auth_testing.md. Ran 32 pytest cases covering public endpoints, auth gating (401), admin RBAC (403), worker/marketer signup, W9 sign, job CRUD + assign/status, payouts + earnings aggregation, portfolio CRUD, site settings, and the unauthenticated /api/upload + /api/files/{path} round-trip via Emergent object storage. ALL 32 tests passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/session", "issue": "On Emergent upstream failure raises 401 broadly even for 5xx/network errors; consider distinguishing 502/503 vs 401. Non-blocking."},
+      {"endpoint": "POST /api/workers/signup, /api/marketers/signup", "issue": "No Pydantic validation on payload (raw dict); invalid types like hours_per_week='abc' would persist. Recommend typed models."},
+      {"endpoint": "POST /api/jobs", "issue": "Raw dict payload — missing required keys (customer_name/email/address) yields 500 (KeyError) instead of 422."},
+      {"endpoint": "POST /api/w9/sign", "issue": "Same pattern - missing required keys -> KeyError 500 instead of 422."},
+      {"endpoint": "POST /api/payouts", "issue": "type field not validated against Literal['work','referral']; any string accepted."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Replace raw dict payloads with Pydantic models on /jobs, /w9/sign, /workers/signup, /marketers/signup, /payouts to return 422 instead of 500 on missing/invalid fields.",
+    "(Optional) Differentiate upstream auth provider 5xx from invalid session_id in /api/auth/session."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 643 lines and mixes auth, storage, models, and 7+ resource routers — split into modules (auth.py, jobs.py, payouts.py, storage.py, models.py) before it grows further.",
+    "Several endpoints accept payload: dict and access required keys directly (payload['customer_name'], payload['amount'], etc.) — this raises 500 on missing keys. Use Pydantic request models for 422 + cleaner errors.",
+    "DELETE /api/portfolio/{id} removes DB record but does not delete the underlying object from Emergent object storage — potential orphaned blobs.",
+    "init_storage() failure silently sets _storage_key=None; subsequent uploads return 503 with no retry. Consider lazy retry on each call.",
+    "earnings_summary iterates with `async for` per bucket (13 separate queries) — fine at low volume; aggregate pipeline would scale better.",
+    "Session cookie set with samesite='none', secure=True is correct for cross-site preview, but also returns the token in JSON body (acceptable for SPA bearer use)."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "n/a"},
+  "test_credentials": "Seeded in MongoDB at test runtime: roles customer/worker/marketer/admin with session_token Bearer auth. All test docs prefixed 'TEST_' / 'test-user-' / 'test_session_' and cleaned up in teardown_module.",
+  "seed_data_creation": "Per-test-session seeding via pymongo into users + user_sessions collections (test_database). Cleaned up after the test module completes.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 32 backend tests pass. Frontend untested per request. Reusable suite at /app/backend/tests/backend_test.py — run with `pytest backend/tests/backend_test.py -v`. /api/upload + /api/files round-trip verified against live Emergent object storage. /api/auth/session was only tested for negative paths (400 missing session_id, 401 invalid) since real Emergent OAuth exchange requires a browser flow; auth-gated endpoints validated via direct mongo session seeding."
+}

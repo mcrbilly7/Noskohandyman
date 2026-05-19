@@ -1,89 +1,642 @@
-from fastapi import FastAPI, APIRouter
+"""Nosko Handyman backend - FastAPI + MongoDB + Emergent Google Auth + Emergent Object Storage."""
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Header, Query, Response, Request, Cookie
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
+from pydantic import BaseModel, Field, EmailStr
+from typing import List, Optional, Literal
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from datetime import datetime, timezone, timedelta
+import os
 import uuid
-from datetime import datetime, timezone
-
+import logging
+import requests as http_requests
+import secrets
+import string
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / ".env")
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+MONGO_URL = os.environ["MONGO_URL"]
+DB_NAME = os.environ["DB_NAME"]
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@nosko.com").lower()
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
+STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
+EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+APP_NAME = "nosko"
 
-# Create the main app without a prefix
-app = FastAPI()
+client = AsyncIOMotorClient(MONGO_URL)
+db = client[DB_NAME]
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+app = FastAPI(title="Nosko Handyman API")
+api = APIRouter(prefix="/api")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("nosko")
+
+# -------------------- Storage helpers --------------------
+_storage_key: Optional[str] = None
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+def init_storage() -> Optional[str]:
+    global _storage_key
+    if _storage_key:
+        return _storage_key
+    if not EMERGENT_LLM_KEY:
+        logger.warning("EMERGENT_LLM_KEY missing; object storage disabled")
+        return None
+    try:
+        r = http_requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_LLM_KEY}, timeout=30)
+        r.raise_for_status()
+        _storage_key = r.json()["storage_key"]
+        logger.info("Object storage initialized")
+    except Exception as e:
+        logger.error(f"Storage init failed: {e}")
+        _storage_key = None
+    return _storage_key
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    key = init_storage()
+    if not key:
+        raise HTTPException(503, "Storage unavailable")
+    r = http_requests.put(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key, "Content-Type": content_type},
+        data=data,
+        timeout=120,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def get_object(path: str):
+    key = init_storage()
+    if not key:
+        raise HTTPException(503, "Storage unavailable")
+    r = http_requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    r.raise_for_status()
+    return r.content, r.headers.get("Content-Type", "application/octet-stream")
+
+
+# -------------------- Models --------------------
+class User(BaseModel):
+    user_id: str
+    email: str
+    name: str
+    picture: Optional[str] = None
+    role: Literal["customer", "worker", "marketer", "admin"] = "customer"
+    referral_code: Optional[str] = None  # marketers only
+    created_at: str
+
+
+class WorkerProfile(BaseModel):
+    user_id: str
+    hours_per_week: Optional[int] = None
+    skills: List[str] = []
+    location: Optional[str] = None
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+    stripe_account_id: Optional[str] = None
+    created_at: str
+
+
+class MarketerProfile(BaseModel):
+    user_id: str
+    referral_code: str
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    stripe_account_id: Optional[str] = None
+    created_at: str
+
+
+class JobRequest(BaseModel):
+    job_id: str
+    customer_name: str
+    customer_email: str
+    customer_phone: Optional[str] = None
+    address: str
+    service_type: str
+    description: str
+    photo_paths: List[str] = []
+    referral_code: Optional[str] = None
+    quoted_amount: float = 25.0
+    status: Literal["new", "assigned", "in_progress", "completed", "cancelled"] = "new"
+    assigned_worker_id: Optional[str] = None
+    created_at: str
+
+
+class W9Record(BaseModel):
+    user_id: str
+    full_legal_name: str
+    business_name: Optional[str] = None
+    ssn_or_ein: str
+    address: str
+    tax_classification: str
+    typed_signature: str
+    pdf_path: Optional[str] = None
+    signed_at: str
+
+
+class Payout(BaseModel):
+    payout_id: str
+    user_id: str
+    amount: float
+    type: Literal["work", "referral"]
+    job_id: Optional[str] = None
+    note: Optional[str] = None
+    method: Literal["stripe", "manual"] = "manual"
+    status: Literal["pending", "paid"] = "paid"
+    created_at: str
+
+
+class PortfolioPhoto(BaseModel):
+    photo_id: str
+    title: str
+    description: Optional[str] = None
+    storage_path: str
+    created_at: str
+
+
+class SiteSettings(BaseModel):
+    hero_title: str = "Fast, fair, fixed-price repairs."
+    hero_subtitle: str = "Switch or outlet replacement starting at $25. $25 minimum on every job."
+    contact_phone: str = "(555) 123-4567"
+    contact_email: str = "hello@nosko.com"
+    service_area: str = "Greater Metro Area"
+
+
+# -------------------- Auth --------------------
+async def get_session_token(authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)) -> Optional[str]:
+    if session_token:
+        return session_token
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip()
+    return None
+
+
+async def get_current_user(token: Optional[str] = Depends(get_session_token)) -> dict:
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    sess = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    if not sess:
+        raise HTTPException(401, "Invalid session")
+    expires_at = sess["expires_at"]
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
+        raise HTTPException(401, "Session expired")
+    user = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(401, "User not found")
+    return user
+
+
+async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin only")
+    return user
+
+
+def gen_referral_code(name: str) -> str:
+    base = "".join(c for c in name.upper() if c.isalpha())[:4] or "NOSKO"
+    suffix = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(4))
+    return f"{base}-{suffix}"
+
+
+@api.post("/auth/session")
+async def auth_session(payload: dict):
+    """Exchange Emergent session_id for our internal session_token."""
+    session_id = payload.get("session_id")
+    if not session_id:
+        raise HTTPException(400, "session_id required")
+    try:
+        r = http_requests.get(EMERGENT_AUTH_URL, headers={"X-Session-ID": session_id}, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        logger.error(f"Emergent auth failed: {e}")
+        raise HTTPException(401, "Auth exchange failed")
+
+    email = data["email"].lower()
+    now = datetime.now(timezone.utc)
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        user_id = existing["user_id"]
+        # Re-promote to admin if matches admin email (idempotent)
+        if email == ADMIN_EMAIL and existing.get("role") != "admin":
+            await db.users.update_one({"user_id": user_id}, {"$set": {"role": "admin"}})
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {"name": data.get("name", existing.get("name")), "picture": data.get("picture")}}
+        )
+    else:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        role = "admin" if email == ADMIN_EMAIL else "customer"
+        await db.users.insert_one({
+            "user_id": user_id,
+            "email": email,
+            "name": data.get("name", email),
+            "picture": data.get("picture"),
+            "role": role,
+            "referral_code": None,
+            "created_at": now.isoformat(),
+        })
+
+    session_token = data["session_token"]
+    expires_at = now + timedelta(days=7)
+    await db.user_sessions.insert_one({
+        "user_id": user_id,
+        "session_token": session_token,
+        "expires_at": expires_at.isoformat(),
+        "created_at": now.isoformat(),
+    })
+
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    resp = JSONResponse({"user": user_doc, "session_token": session_token})
+    resp.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path="/",
+        max_age=7 * 24 * 60 * 60,
+    )
+    return resp
+
+
+@api.get("/auth/me")
+async def auth_me(user: dict = Depends(get_current_user)):
+    return user
+
+
+@api.post("/auth/logout")
+async def auth_logout(token: Optional[str] = Depends(get_session_token)):
+    if token:
+        await db.user_sessions.delete_one({"session_token": token})
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("session_token", path="/")
+    return resp
+
+
+# -------------------- Role / Profile setup --------------------
+@api.post("/workers/signup")
+async def worker_signup(payload: dict, user: dict = Depends(get_current_user)):
+    now = datetime.now(timezone.utc).isoformat()
+    profile = {
+        "user_id": user["user_id"],
+        "hours_per_week": payload.get("hours_per_week"),
+        "skills": payload.get("skills", []),
+        "location": payload.get("location"),
+        "phone": payload.get("phone"),
+        "bio": payload.get("bio"),
+        "stripe_account_id": None,
+        "created_at": now,
+    }
+    await db.worker_profiles.update_one({"user_id": user["user_id"]}, {"$set": profile}, upsert=True)
+    if user.get("role") not in ("admin",):
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"role": "worker"}})
+    return {"ok": True, "profile": profile}
+
+
+@api.get("/workers/me")
+async def worker_me(user: dict = Depends(get_current_user)):
+    profile = await db.worker_profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return profile or {}
+
+
+@api.get("/workers")
+async def list_workers(_: dict = Depends(require_admin)):
+    workers = await db.worker_profiles.find({}, {"_id": 0}).to_list(1000)
+    for w in workers:
+        u = await db.users.find_one({"user_id": w["user_id"]}, {"_id": 0})
+        w["user"] = u
+    return workers
+
+
+@api.post("/marketers/signup")
+async def marketer_signup(payload: dict, user: dict = Depends(get_current_user)):
+    now = datetime.now(timezone.utc).isoformat()
+    # Generate referral code if not set
+    code = user.get("referral_code")
+    if not code:
+        for _ in range(5):
+            candidate = gen_referral_code(user.get("name", "NOSKO"))
+            exists = await db.users.find_one({"referral_code": candidate}, {"_id": 0})
+            if not exists:
+                code = candidate
+                break
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"referral_code": code}})
+    profile = {
+        "user_id": user["user_id"],
+        "referral_code": code,
+        "phone": payload.get("phone"),
+        "location": payload.get("location"),
+        "stripe_account_id": None,
+        "created_at": now,
+    }
+    await db.marketer_profiles.update_one({"user_id": user["user_id"]}, {"$set": profile}, upsert=True)
+    if user.get("role") not in ("admin",):
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"role": "marketer"}})
+    return {"ok": True, "referral_code": code, "profile": profile}
+
+
+@api.get("/marketers/me")
+async def marketer_me(user: dict = Depends(get_current_user)):
+    profile = await db.marketer_profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return profile or {}
+
+
+@api.get("/marketers")
+async def list_marketers(_: dict = Depends(require_admin)):
+    marketers = await db.marketer_profiles.find({}, {"_id": 0}).to_list(1000)
+    for m in marketers:
+        u = await db.users.find_one({"user_id": m["user_id"]}, {"_id": 0})
+        m["user"] = u
+        m["referral_count"] = await db.jobs.count_documents({"referral_code": m["referral_code"]})
+    return marketers
+
+
+@api.get("/referral/{code}")
+async def referral_check(code: str):
+    user = await db.users.find_one({"referral_code": code.upper()}, {"_id": 0, "name": 1, "referral_code": 1})
+    if not user:
+        return {"valid": False}
+    return {"valid": True, "marketer_name": user.get("name")}
+
+
+# -------------------- W9 --------------------
+@api.post("/w9/sign")
+async def w9_sign(payload: dict, user: dict = Depends(get_current_user)):
+    record = {
+        "user_id": user["user_id"],
+        "full_legal_name": payload["full_legal_name"],
+        "business_name": payload.get("business_name"),
+        "ssn_or_ein": payload["ssn_or_ein"],
+        "address": payload["address"],
+        "tax_classification": payload.get("tax_classification", "individual"),
+        "typed_signature": payload["typed_signature"],
+        "pdf_path": payload.get("pdf_path"),
+        "signed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.w9_records.update_one({"user_id": user["user_id"]}, {"$set": record}, upsert=True)
+    return {"ok": True}
+
+
+@api.get("/w9/me")
+async def w9_me(user: dict = Depends(get_current_user)):
+    rec = await db.w9_records.find_one({"user_id": user["user_id"]}, {"_id": 0, "ssn_or_ein": 0})
+    return rec or {}
+
+
+# -------------------- Files --------------------
+@api.post("/upload")
+async def upload(file: UploadFile = File(...), folder: str = Form("misc")):
+    """Public-ish upload used for job photos, portfolio, W9 PDFs.
+
+    No auth required for job-photo uploads so anonymous customers can attach images.
+    """
+    ext = (file.filename.rsplit(".", 1)[-1] if "." in (file.filename or "") else "bin").lower()
+    safe_folder = "".join(c for c in folder if c.isalnum() or c in ("-", "_")) or "misc"
+    path = f"{APP_NAME}/{safe_folder}/{uuid.uuid4().hex}.{ext}"
+    data = await file.read()
+    result = put_object(path, data, file.content_type or "application/octet-stream")
+    await db.files.insert_one({
+        "id": str(uuid.uuid4()),
+        "storage_path": result["path"],
+        "original_filename": file.filename,
+        "content_type": file.content_type,
+        "size": result.get("size"),
+        "is_deleted": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"path": result["path"]}
+
+
+@api.get("/files/{path:path}")
+async def download(path: str):
+    rec = await db.files.find_one({"storage_path": path, "is_deleted": False}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "File not found")
+    data, ctype = get_object(path)
+    return Response(content=data, media_type=rec.get("content_type") or ctype)
+
+
+# -------------------- Jobs --------------------
+@api.post("/jobs")
+async def create_job(payload: dict):
+    """Public endpoint - customers can submit a request without login."""
+    now = datetime.now(timezone.utc).isoformat()
+    referral_code = (payload.get("referral_code") or "").upper().strip() or None
+    if referral_code:
+        ref = await db.users.find_one({"referral_code": referral_code}, {"_id": 0})
+        if not ref:
+            referral_code = None
+    job = {
+        "job_id": f"job_{uuid.uuid4().hex[:10]}",
+        "customer_name": payload["customer_name"],
+        "customer_email": payload["customer_email"],
+        "customer_phone": payload.get("customer_phone"),
+        "address": payload["address"],
+        "service_type": payload.get("service_type", "Switch/Outlet Replacement"),
+        "description": payload.get("description", ""),
+        "photo_paths": payload.get("photo_paths", []),
+        "referral_code": referral_code,
+        "quoted_amount": float(payload.get("quoted_amount") or 25.0),
+        "status": "new",
+        "assigned_worker_id": None,
+        "created_at": now,
+    }
+    await db.jobs.insert_one(job)
+    job.pop("_id", None)
+    return job
+
+
+@api.get("/jobs")
+async def list_jobs(_: dict = Depends(require_admin)):
+    jobs = await db.jobs.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return jobs
+
+
+@api.get("/jobs/me")
+async def my_jobs(user: dict = Depends(get_current_user)):
+    jobs = await db.jobs.find({"assigned_worker_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return jobs
+
+
+@api.put("/jobs/{job_id}/assign")
+async def assign_job(job_id: str, payload: dict, _: dict = Depends(require_admin)):
+    worker_id = payload.get("worker_id")
+    if not worker_id:
+        raise HTTPException(400, "worker_id required")
+    res = await db.jobs.update_one({"job_id": job_id}, {"$set": {"assigned_worker_id": worker_id, "status": "assigned"}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Job not found")
+    return {"ok": True}
+
+
+@api.put("/jobs/{job_id}/status")
+async def update_job_status(job_id: str, payload: dict, _: dict = Depends(require_admin)):
+    status = payload.get("status")
+    if status not in ("new", "assigned", "in_progress", "completed", "cancelled"):
+        raise HTTPException(400, "invalid status")
+    res = await db.jobs.update_one({"job_id": job_id}, {"$set": {"status": status}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Job not found")
+    return {"ok": True}
+
+
+# -------------------- Payouts / Earnings --------------------
+@api.post("/payouts")
+async def create_payout(payload: dict, _: dict = Depends(require_admin)):
+    payout = {
+        "payout_id": f"pay_{uuid.uuid4().hex[:10]}",
+        "user_id": payload["user_id"],
+        "amount": float(payload["amount"]),
+        "type": payload.get("type", "work"),
+        "job_id": payload.get("job_id"),
+        "note": payload.get("note"),
+        "method": payload.get("method", "manual"),
+        "status": "paid",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.payouts.insert_one(payout)
+    payout.pop("_id", None)
+    return payout
+
+
+@api.get("/payouts/me")
+async def my_payouts(user: dict = Depends(get_current_user)):
+    payouts = await db.payouts.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return payouts
+
+
+@api.get("/payouts")
+async def list_payouts(_: dict = Depends(require_admin)):
+    payouts = await db.payouts.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return payouts
+
+
+@api.get("/earnings/summary")
+async def earnings_summary(user: dict = Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    week_ago = (now - timedelta(days=7)).isoformat()
+    month_ago = (now - timedelta(days=30)).isoformat()
+    year_ago = (now - timedelta(days=365)).isoformat()
+
+    async def total(since: Optional[str]) -> float:
+        q = {"user_id": user["user_id"], "status": "paid"}
+        if since:
+            q["created_at"] = {"$gte": since}
+        cur = db.payouts.find(q, {"_id": 0, "amount": 1})
+        return round(sum([p["amount"] async for p in cur]), 2)
+
+    weekly = await total(week_ago)
+    monthly = await total(month_ago)
+    yearly = await total(year_ago)
+    all_time = await total(None)
+
+    # Series for chart: last 12 weeks
+    series = []
+    for i in range(11, -1, -1):
+        start = (now - timedelta(days=(i + 1) * 7)).isoformat()
+        end = (now - timedelta(days=i * 7)).isoformat()
+        cur = db.payouts.find(
+            {"user_id": user["user_id"], "status": "paid", "created_at": {"$gte": start, "$lt": end}},
+            {"_id": 0, "amount": 1},
+        )
+        s = round(sum([p["amount"] async for p in cur]), 2)
+        series.append({"week": f"W-{i}", "amount": s})
+
+    return {"weekly": weekly, "monthly": monthly, "yearly": yearly, "all_time": all_time, "series": series}
+
+
+# -------------------- Portfolio + Site Settings --------------------
+@api.get("/portfolio")
+async def portfolio_list():
+    items = await db.portfolio.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return items
+
+
+@api.post("/portfolio")
+async def portfolio_add(payload: dict, _: dict = Depends(require_admin)):
+    item = {
+        "photo_id": f"ph_{uuid.uuid4().hex[:10]}",
+        "title": payload["title"],
+        "description": payload.get("description"),
+        "storage_path": payload["storage_path"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.portfolio.insert_one(item)
+    item.pop("_id", None)
+    return item
+
+
+@api.delete("/portfolio/{photo_id}")
+async def portfolio_delete(photo_id: str, _: dict = Depends(require_admin)):
+    res = await db.portfolio.delete_one({"photo_id": photo_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Not found")
+    return {"ok": True}
+
+
+@api.get("/site/settings")
+async def get_site_settings():
+    s = await db.site_settings.find_one({"key": "default"}, {"_id": 0, "key": 0})
+    if not s:
+        s = SiteSettings().model_dump()
+    return s
+
+
+@api.put("/site/settings")
+async def update_site_settings(payload: dict, _: dict = Depends(require_admin)):
+    allowed = set(SiteSettings.model_fields.keys())
+    update = {k: v for k, v in payload.items() if k in allowed}
+    await db.site_settings.update_one({"key": "default"}, {"$set": {"key": "default", **update}}, upsert=True)
+    return await get_site_settings()
+
+
+# -------------------- Admin stats --------------------
+@api.get("/admin/stats")
+async def admin_stats(_: dict = Depends(require_admin)):
+    return {
+        "jobs_total": await db.jobs.count_documents({}),
+        "jobs_new": await db.jobs.count_documents({"status": "new"}),
+        "jobs_completed": await db.jobs.count_documents({"status": "completed"}),
+        "workers": await db.worker_profiles.count_documents({}),
+        "marketers": await db.marketer_profiles.count_documents({}),
+        "payouts_total": sum(
+            [p["amount"] async for p in db.payouts.find({"status": "paid"}, {"_id": 0, "amount": 1})]
+        ),
+    }
+
+
+# -------------------- App wiring --------------------
+@api.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"service": "nosko", "status": "ok"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
-
-# Include the router in the main app
-app.include_router(api_router)
+app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def _startup():
+    init_storage()
+
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
+async def _shutdown():
     client.close()
