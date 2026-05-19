@@ -1,58 +1,68 @@
 # Nosko Handyman — PRD
 
 ## Original problem statement
-Build a website for "Nosko" handyman company. One set price: $25 for switch/outlet replacement with $25 minimum.
-- W9 worker (handyman) signup: hours, skills, location, W9 signing.
-- W9 marketer signup: gets personal referral code, 15% profit share when someone books using it.
-- Admin pays workers through the app (Stripe Connect).
-- Workers/marketers see weekly/monthly/yearly profits.
-- Admin page: portfolio photo upload, edit site, list of marketers/workers, all incoming job requests.
-- Customers upload a photo with each job request.
+Build a website for "Nosko" handyman company. Set prices ($25 switch/outlet, $50 minimum). W9 worker + marketer signup with 15% referral profit share. Admin paying workers, earnings dashboards (weekly/monthly/yearly), portfolio + admin site editor, job request with photo upload, automated emails.
 
-## User choices captured
-- Worker payouts: Stripe Connect (real Stripe Connect onboarding deferred — admin currently records payouts manually with method='stripe'; Stripe Connect onboarding playbook to be added next)
-- Customer payments: Quote-only (no Stripe checkout for customers)
-- Auth: Emergent-managed Google login (no app passwords)
-- W9: Typed signature + optional PDF upload
-- Design: Swiss high-contrast brutalism — yellow (#FFD600) + black, Cabinet Grotesk display + IBM Plex Sans
+## Iteration 2 user requirements (Feb 2026)
+- Make site cleaner and more professional ✓
+- Confirm: handyman does everything (outlet is only known price) ✓
+- **Minimum is $50 per visit** (was $25) ✓
+- Founding admins: **noskotx@gmail.com**, **nossonkosowsky32@gmail.com** ✓
+- Founding admins can change other accounts to admin/developer/worker/marketer/customer ✓
+- Forgot password + reset flow ✓ (for email/password users)
+- Automated emails on signup and quote request ✓ (Gmail SMTP)
+- noskotx@gmail.com is company email ✓
+- DFW Metroplex business ✓
+- **Full account settings page for every account** ✓
 
-## Architecture
+## Tech stack
+- Backend: FastAPI + motor (async MongoDB) + bcrypt + smtplib + Emergent Object Storage
 - Frontend: React 19 + Tailwind + shadcn/ui + Recharts + Sonner toasts
-- Backend: FastAPI + motor (async MongoDB)
-- Auth: Emergent Google OAuth (session_token cookie + Bearer fallback)
-- Storage: Emergent object storage (job photos, portfolio, W9 PDFs)
-- Routing: react-router-dom v7 with synchronous OAuth callback detection
+- Auth: hybrid — Emergent Google OAuth + email/password (bcrypt + session_token cookie)
 
-## Personas
-1. Customer (anonymous) — books jobs, uploads photo, optionally uses marketer code
-2. Worker — applies as handyman, signs W9, sees jobs + earnings
-3. Marketer — applies, gets referral code, shares it, sees referral earnings
-4. Admin — full ops view: jobs, workers, marketers, portfolio, site settings, payouts
+## Implemented endpoints (iter 2)
+- **Email/password auth**: `/api/auth/register`, `/api/auth/login`, `/api/auth/forgot-password`, `/api/auth/reset-password`
+- **Google OAuth**: `/api/auth/session` (Emergent OAuth exchange)
+- **Account**: `PUT /api/users/me` (name/phone/location/notify_email/password)
+- **Team management**: `GET /api/admin/users`, `PUT /api/admin/users/{id}/role` (founder-only)
+- All prior endpoints (jobs, workers, marketers, w9, payouts, portfolio, site settings) retained
 
-## What's implemented (2026-02)
-- Public marketing landing with hero, pricing card, marquee, portfolio grid, programs CTAs
-- Job request flow (anonymous) with photo upload + referral code validation
-- Worker signup wizard: profile → W9 → done; role auto-promoted to "worker"
-- Marketer signup wizard: profile → W9 → done; unique referral code generated, role auto-promoted to "marketer"
-- Worker dashboard: weekly/monthly/yearly earnings, 12-week bar chart, jobs table, payouts list
-- Marketer dashboard: code + copyable share link, earnings cards + chart
-- Admin dashboard tabs: Jobs (assign/status/quotes/photos), Workers (pay), Marketers (referral count + pay), Portfolio (upload/delete), Site Settings (hero copy, contact, area)
-- Auth: Emergent OAuth (Google), cookies + Bearer, admin auto-promotion via ADMIN_EMAIL env
-- Object storage: live emergent storage for all uploads
-- W9 records: typed signature + optional PDF link
+## Implemented pages (iter 2)
+- Cleaner LandingPage (removed heavy yellow blocks, added services grid, DFW callout, free-quote panel)
+- `/login`, `/register`, `/forgot-password`, `/reset-password`
+- `/account` — full account settings (any user can edit profile + password)
+- AdminDashboard: new **Team** tab — founders see role dropdown per user, non-founders see read-only list
 
-## Backend test coverage
-- 32 pytest cases, 100% pass (see `/app/test_reports/iteration_1.json`).
-- Auth gating, RBAC, file round-trip, payouts/earnings aggregation, portfolio CRUD all verified.
+## Email notifications (Gmail SMTP)
+- Welcome email on signup
+- New-job-request → noskotx@gmail.com (company)
+- New-job-request confirmation → customer
+- Password reset link → user
+
+⚠️ **SMTP password issue**: Gmail rejects normal passwords. The provided password "Bigbilly101!" gets a 535 BadCredentials from Google. Backend handles this gracefully (no 500s) but no emails actually deliver yet. **Owner must**: enable 2-Step Verification on noskotx@gmail.com → generate App Password at https://myaccount.google.com/apppasswords → replace `SMTP_PASSWORD` in `/app/backend/.env` with the 16-char app password.
+
+## Pricing logic
+- Every visit has a **$50 minimum**. Quotes < $50 are clamped to $50 server-side.
+- Switch/outlet swap is **$25 per swap**. A single-outlet job still totals $50 (minimum). 2-outlet job = $50 (2×$25). 3-outlet job = $75. Etc. Copy updated to reflect this clearly.
+
+## Tests
+- **66/66 backend tests pass** (iter1 + iter2). See `/app/test_reports/iteration_2.json`.
 
 ## Backlog (P0 → P2)
-- **P1**: Real Stripe Connect Express onboarding for workers/marketers (so admin can actually push payments to a connected bank).
-- **P1**: Pydantic request models on POST /api/jobs, /api/w9/sign, /api/workers/signup, /api/marketers/signup, /api/payouts (currently raw dict — missing keys throw 500 instead of 422).
-- **P2**: Email notifications on new job + on payout.
-- **P2**: Delete underlying object in storage on portfolio delete (currently DB-only soft delete).
-- **P2**: Admin "mark paid" button next to each completed job (instead of free-form prompt).
-- **P2**: Customer-facing "track my job" link with status updates.
+- **P0 (owner action)**: Replace Gmail SMTP password with a real Google App Password.
+- **P1**: Real Stripe Connect Express onboarding (currently admin records payouts manually with method='stripe').
+- **P1**: Pydantic request models on POST endpoints for 422 instead of 500 on missing fields.
+- **P1**: Move SMTP sends to FastAPI BackgroundTasks (currently synchronous in async handlers — adds latency under failure).
+- **P2**: Job-status emails to customer + worker.
+- **P2**: TTL index on user_sessions.expires_at for auto-cleanup.
+- **P2**: Split server.py into modules (auth.py, jobs.py, email_service.py, storage.py).
+- **P2**: Customer-facing "track my job" page.
 
-## Open notes for next session
-- The admin email is `admin@nosko.com` (configurable via `ADMIN_EMAIL` in backend/.env). The first user to sign in with that email is automatically promoted to admin.
-- Stripe Connect onboarding flow is the most valuable next addition — owner can wire it up by calling the integration playbook for Stripe Connect and supplying their Stripe API key (currently using `sk_test_emergent` placeholder).
+## Founding admin behavior
+- The two founding emails are auto-promoted to admin on first sign-in via EITHER Google or email/password.
+- Founders cannot be demoted by other admins (server enforces).
+- Only founders can call `PUT /api/admin/users/{id}/role`.
+
+## Open notes
+- Original Stripe Connect (real payout flow) deferred — admin currently records payouts manually. Real Connect onboarding requires Stripe API key + Connect platform setup.
+- Frontend untested end-to-end after iter 2 changes; backend fully validated.

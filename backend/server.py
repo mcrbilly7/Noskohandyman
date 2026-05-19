@@ -191,7 +191,7 @@ def get_object(path: str):
 # -------------------- Models --------------------
 class SiteSettings(BaseModel):
     hero_title: str = "Full handyman service, fixed honest pricing."
-    hero_subtitle: str = "Switch & outlet replacement set at $25. Every job has a $50 minimum. Based in the DFW Metroplex."
+    hero_subtitle: str = "$25 per switch/outlet swap. $50 minimum per visit (covers travel + diagnosis). DFW Metroplex."
     contact_phone: str = "(555) 123-4567"
     contact_email: str = "noskotx@gmail.com"
     service_area: str = "DFW Metroplex"

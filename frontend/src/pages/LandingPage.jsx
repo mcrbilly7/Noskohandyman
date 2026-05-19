@@ -39,7 +39,7 @@ export default function LandingPage() {
               </h1>
               <p className="mt-7 text-lg max-w-xl text-neutral-700">
                 {settings?.hero_subtitle ||
-                  `Switch & outlet replacement fixed at $${outletPrice}. Every job has a $${minCharge} minimum. No hidden fees, no upcharge games.`}
+                  `$${outletPrice} per switch/outlet swap. $${minCharge} minimum per visit (covers travel + diagnosis). DFW Metroplex.`}
               </p>
               <div className="mt-10 flex flex-wrap gap-3">
                 <Link to="/request" className="btn-brutal" data-testid="hero-request-btn">
@@ -58,12 +58,12 @@ export default function LandingPage() {
               <div className="border-2 border-black bg-white">
                 <div className="grid grid-cols-2 divide-x-2 divide-black border-b-2 border-black">
                   <div className="p-6">
-                    <div className="overline text-neutral-500">Set price</div>
+                    <div className="overline">Per swap</div>
                     <div className="font-display text-5xl tracking-tighter mt-1">${outletPrice}</div>
-                    <div className="overline mt-1">Switch / outlet swap</div>
+                    <div className="overline mt-1">Switch / outlet</div>
                   </div>
                   <div className="p-6 bg-[#FFD600]">
-                    <div className="overline">Minimum</div>
+                    <div className="overline">Visit minimum</div>
                     <div className="font-display text-5xl tracking-tighter mt-1">${minCharge}</div>
                     <div className="overline mt-1">On every job</div>
                   </div>
@@ -90,7 +90,7 @@ export default function LandingPage() {
             Anything a handyman does — we do.
           </h2>
           <p className="mt-3 text-neutral-700 max-w-2xl">
-            One known set price: <b>${outletPrice}</b> for switches and outlets. Everything else gets a quick free quote with the same upfront honesty.
+            One known set price: <b>${outletPrice}</b> per switch/outlet swap. Every visit has a <b>${minCharge}</b> floor (covers travel + diagnosis). All other work gets a free quote.
           </p>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-10">
