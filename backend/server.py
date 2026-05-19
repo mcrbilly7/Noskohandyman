@@ -29,7 +29,8 @@ load_dotenv(ROOT_DIR / ".env")
 
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
-FOUNDING_ADMINS = {e.strip().lower() for e in os.environ.get("FOUNDING_ADMINS", "").split(",") if e.strip()}
+FOUNDING_ADMINS_LIST = [e.strip().lower() for e in os.environ.get("FOUNDING_ADMINS", "").split(",") if e.strip()]
+FOUNDING_ADMINS = set(FOUNDING_ADMINS_LIST)
 COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "noskotx@gmail.com")
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
@@ -767,9 +768,15 @@ async def _auto_payout_on_complete(job: dict, admin_user: dict):
     paid_sum = sum(s["amount"] for s in splits)
     platform_share = round(amount - paid_sum, 2)
     if platform_share > 0:
-        founder = await db.users.find_one({"email": {"$in": list(FOUNDING_ADMINS)}}, {"_id": 0, "user_id": 1})
-        if founder:
-            splits.append({"user_id": founder["user_id"], "amount": platform_share, "type": "platform"})
+        # Pin platform payout to first founding admin (deterministic across restarts)
+        founder = None
+        for fe in FOUNDING_ADMINS_LIST:
+            f = await db.users.find_one({"email": fe}, {"_id": 0, "user_id": 1})
+            if f:
+                founder = f
+                break
+        platform_user_id = founder["user_id"] if founder else "platform"
+        splits.append({"user_id": platform_user_id, "amount": platform_share, "type": "platform"})
 
     created = []
     for s in splits:
@@ -814,16 +821,27 @@ async def update_job_status(job_id: str, payload: dict, admin: dict = Depends(re
     status = payload.get("status")
     if status not in ("new", "assigned", "in_progress", "completed", "cancelled"):
         raise HTTPException(400, "invalid status")
-    job = await db.jobs.find_one({"job_id": job_id}, {"_id": 0})
-    if not job:
-        raise HTTPException(404, "Job not found")
-    prev_status = job.get("status")
-    await db.jobs.update_one({"job_id": job_id}, {"$set": {"status": status}})
 
     auto_payouts = []
-    if status == "completed" and prev_status != "completed" and payload.get("auto_payout", True):
-        job["status"] = "completed"
+    if status == "completed" and payload.get("auto_payout", True):
+        # Atomic transition: only flip to completed if not already completed (prevents double payout under races)
+        job = await db.jobs.find_one_and_update(
+            {"job_id": job_id, "status": {"$ne": "completed"}},
+            {"$set": {"status": "completed"}},
+            projection={"_id": 0},
+            return_document=True,  # returns updated doc; if no match -> None
+        )
+        if job is None:
+            # Either job missing or already completed - check which
+            existing = await db.jobs.find_one({"job_id": job_id}, {"_id": 0, "status": 1})
+            if not existing:
+                raise HTTPException(404, "Job not found")
+            return {"ok": True, "auto_payouts": [], "note": "already completed"}
         auto_payouts = await _auto_payout_on_complete(job, admin)
+    else:
+        res = await db.jobs.update_one({"job_id": job_id}, {"$set": {"status": status}})
+        if res.matched_count == 0:
+            raise HTTPException(404, "Job not found")
     return {"ok": True, "auto_payouts": auto_payouts}
 
 
