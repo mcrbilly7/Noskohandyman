@@ -701,6 +701,13 @@ async def create_job(payload: dict, request: Request):
         ref = await db.users.find_one({"referral_code": referral_code}, {"_id": 0})
         if not ref:
             referral_code = None
+    # Reject job if preferred_date is on a blocked day
+    pdate = (payload.get("preferred_date") or "").strip() or None
+    if pdate:
+        avail = await db.availability.find_one({"key": "default"}, {"_id": 0, "blocked_dates": 1})
+        blocked = (avail or {}).get("blocked_dates", [])
+        if pdate in blocked:
+            raise HTTPException(400, "Selected date is unavailable. Please pick another day.")
     settings_doc = await db.site_settings.find_one({"key": "default"}, {"_id": 0, "key": 0})
     minimum = float((settings_doc or {}).get("minimum_charge", 50.0))
     service_type = payload.get("service_type", "General Handyman")
@@ -1148,6 +1155,29 @@ async def admin_stats(_: dict = Depends(require_admin)):
             [p["amount"] async for p in db.payouts.find({"status": "paid"}, {"_id": 0, "amount": 1})]
         ),
     }
+
+
+# -------------------- Availability blocking --------------------
+@api.get("/availability")
+async def get_availability():
+    """Public: returns the list of YYYY-MM-DD dates the owner is unavailable."""
+    doc = await db.availability.find_one({"key": "default"}, {"_id": 0, "key": 0})
+    return {"blocked_dates": (doc or {}).get("blocked_dates", [])}
+
+
+@api.put("/availability")
+async def set_availability(payload: dict, _: dict = Depends(require_admin)):
+    """Admin: replace the full set of blocked dates. Accepts {"blocked_dates": ["YYYY-MM-DD", ...]}."""
+    dates = payload.get("blocked_dates", [])
+    if not isinstance(dates, list):
+        raise HTTPException(400, "blocked_dates must be a list")
+    cleaned = sorted({str(d).strip() for d in dates if isinstance(d, str) and len(d.strip()) == 10})
+    await db.availability.update_one(
+        {"key": "default"},
+        {"$set": {"key": "default", "blocked_dates": cleaned, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"blocked_dates": cleaned}
 
 
 # -------------------- App wiring --------------------

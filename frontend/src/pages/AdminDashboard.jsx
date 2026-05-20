@@ -4,8 +4,9 @@ import { api, fileUrl } from "@/lib/api";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import FileUploader from "@/components/shared/FileUploader";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Image as ImageIcon, Trash2, ShieldAlert } from "lucide-react";
+import { Image as ImageIcon, Trash2, ShieldAlert, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
+import AvailabilityEditor from "@/components/shared/AvailabilityEditor";
 
 const FOUNDING_EMAILS = ["noskotx@gmail.com", "nossonkosowsky32@gmail.com"];
 
@@ -61,7 +62,7 @@ export default function AdminDashboard() {
         <Tabs defaultValue="jobs" className="mt-8">
           <TabsList className="bg-black text-white rounded-none border-2 border-black p-0 h-auto flex flex-wrap">
             {[
-              ["jobs", "Quote requests"], ["team", "Team"], ["portfolio", "Portfolio"], ["settings", "Edit website"],
+              ["jobs", "Quote requests"], ["schedule", "Schedule"], ["team", "Team"], ["portfolio", "Portfolio"], ["settings", "Edit website"],
             ].map(([v, l]) => (
               <TabsTrigger key={v} value={v} className="rounded-none data-[state=active]:bg-[#FFD600] data-[state=active]:text-black overline px-4 py-2" data-testid={`tab-${v}`}>{l}</TabsTrigger>
             ))}
@@ -112,9 +113,12 @@ export default function AdminDashboard() {
             </div>
           </TabsContent>
 
+          <TabsContent value="schedule" className="mt-4">
+            <AvailabilityEditor />
+          </TabsContent>
+
           <TabsContent value="team" className="mt-4">
-            <div className="border-2 border-black bg-white" data-testid="admin-team-section">
-              <div className="p-4 border-b border-black bg-[#F9FAFB] flex items-center justify-between">
+            <div className="border-2 border-black bg-white" data-testid="admin-team-section">              <div className="p-4 border-b border-black bg-[#F9FAFB] flex items-center justify-between">
                 <div>
                   <div className="overline">All users · {users.length}</div>
                   <div className="text-sm text-neutral-700">Founders can change anyone's role. Admins & developers see this list read-only.</div>
@@ -277,16 +281,33 @@ function SiteSettingsEditor({ settings, onSave }) {
         <div><label className="overline">Custom subheading (optional)</label><textarea rows={2} value={form.services_subheading || ""} onChange={set("services_subheading")} placeholder="Leave empty to auto-generate from $ amounts" /></div>
         <div>
           <div className="overline mb-2">Service tiles ({(form.services || []).length})</div>
-          <div className="grid gap-3">
+          <div className="grid gap-4">
             {(form.services || []).map((sv, i) => (
-              <div key={i} className="grid grid-cols-[1fr_2fr_auto] gap-2 items-start" data-testid={`service-row-${i}`}>
-                <input placeholder="Title" value={sv.title || ""} onChange={setItem("services", i, "title")} data-testid={`service-title-${i}`} />
-                <input placeholder="Description" value={sv.description || ""} onChange={setItem("services", i, "description")} data-testid={`service-desc-${i}`} />
-                <button type="button" className="overline border border-black px-2 py-1 hover:bg-red-50" onClick={removeItem("services", i)} data-testid={`service-del-${i}`}>×</button>
+              <div key={i} className="border border-black p-3 grid md:grid-cols-[140px_1fr] gap-3 items-start" data-testid={`service-row-${i}`}>
+                <div>
+                  <div className="overline text-[10px] mb-1">Cover image</div>
+                  <FileUploader
+                    folder="services"
+                    accept="image/*"
+                    multiple={false}
+                    value={sv.image_path ? [sv.image_path] : []}
+                    onChange={(arr) => {
+                      const list = [...(form.services || [])];
+                      list[i] = { ...list[i], image_path: arr[0] || "" };
+                      setForm({ ...form, services: list });
+                    }}
+                    testid={`service-img-${i}`}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <input placeholder="Title" value={sv.title || ""} onChange={setItem("services", i, "title")} data-testid={`service-title-${i}`} />
+                  <textarea placeholder="Description" rows={2} value={sv.description || ""} onChange={setItem("services", i, "description")} data-testid={`service-desc-${i}`} />
+                  <button type="button" className="overline border border-black px-2 py-1 hover:bg-red-50 justify-self-start" onClick={removeItem("services", i)} data-testid={`service-del-${i}`}>Remove tile</button>
+                </div>
               </div>
             ))}
           </div>
-          <button type="button" className="btn-brutal ghost mt-3" onClick={addItem("services", { title: "", description: "" })} data-testid="add-service-btn">+ Add service</button>
+          <button type="button" className="btn-brutal ghost mt-3" onClick={addItem("services", { title: "", description: "", image_path: "" })} data-testid="add-service-btn">+ Add service</button>
         </div>
       </Section>
 

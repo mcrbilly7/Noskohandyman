@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import Navbar from "@/components/shared/Navbar";
 import Footer from "@/components/shared/Footer";
@@ -40,6 +40,7 @@ export default function JobRequestPage() {
   const [done, setDone] = useState(null);
   const [date, setDate] = useState(null);
   const [slot, setSlot] = useState("flexible");
+  const [blockedSet, setBlockedSet] = useState(new Set());
   const [form, setForm] = useState({
     customer_name: "",
     customer_email: "",
@@ -48,6 +49,12 @@ export default function JobRequestPage() {
     service_type: "General Handyman",
     description: "",
   });
+
+  useEffect(() => {
+    api.get("/availability").then((r) => {
+      setBlockedSet(new Set(r.data?.blocked_dates || []));
+    }).catch(() => {});
+  }, []);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -161,9 +168,14 @@ export default function JobRequestPage() {
                     mode="single"
                     selected={date}
                     onSelect={setDate}
-                    disabled={(d) => d < today}
+                    disabled={(d) => d < today || blockedSet.has(fmtDate(d))}
                     data-testid="job-calendar"
                   />
+                  {blockedSet.size > 0 && (
+                    <div className="px-3 py-2 border-t border-black overline text-[10px] text-neutral-600">
+                      {blockedSet.size} day{blockedSet.size === 1 ? "" : "s"} unavailable
+                    </div>
+                  )}
                 </div>
                 <div>
                   <div className="overline mb-2">Time window</div>

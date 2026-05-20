@@ -123,9 +123,16 @@ export default function LandingPage() {
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-10">
             {(s.services || []).map((sv, i) => (
-              <div key={i} className="border border-black bg-white p-5">
-                <div className="font-display text-lg tracking-tight">{sv.title}</div>
-                <p className="text-sm text-neutral-600 mt-1">{sv.description}</p>
+              <div key={i} className="border border-black bg-white overflow-hidden flex flex-col" data-testid={`service-tile-${i}`}>
+                {sv.image_path && (
+                  <div className="aspect-[4/3] border-b border-black overflow-hidden">
+                    <img src={fileUrl(sv.image_path)} alt={sv.title} className="w-full h-full object-cover" />
+                  </div>
+                )}
+                <div className="p-5">
+                  <div className="font-display text-lg tracking-tight">{sv.title}</div>
+                  <p className="text-sm text-neutral-600 mt-1">{sv.description}</p>
+                </div>
               </div>
             ))}
           </div>
