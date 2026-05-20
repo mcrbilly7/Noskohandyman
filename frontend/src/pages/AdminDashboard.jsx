@@ -85,6 +85,11 @@ export default function AdminDashboard() {
                         <div className="text-sm text-neutral-600">{j.customer_email} · {j.customer_phone || "—"}</div>
                         <div className="text-sm mt-1">{j.address}</div>
                         <p className="text-sm mt-2 max-w-prose">{j.description}</p>
+                        {j.preferred_date && (
+                          <span className="overline text-[10px] inline-block mt-2 bg-black text-[#FFD600] px-2 py-0.5">
+                            ⏱ {j.preferred_date} · {j.preferred_time_slot}
+                          </span>
+                        )}
                       </div>
                       <div className="lg:col-span-3">
                         <div className="overline">Update status</div>

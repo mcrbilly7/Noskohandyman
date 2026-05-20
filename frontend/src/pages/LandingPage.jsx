@@ -39,8 +39,11 @@ export default function LandingPage() {
   }
 
   const minCharge = s.minimum_charge ?? 50;
-  const outletPrice = s.outlet_price ?? 25;
-  const servicesSub = s.services_subheading || `One known set price: $${outletPrice} per switch/outlet swap. Every visit has a $${minCharge} floor (covers travel + diagnosis). All other work gets a free quote.`;
+  const outletPrice = s.outlet_price ?? 0;
+  const showOutletCard = outletPrice > 0;
+  const servicesSub = s.services_subheading || (showOutletCard
+    ? `$${outletPrice} per switch/outlet swap. Every visit has a $${minCharge} floor (covers travel + diagnosis). All other work gets a free quote.`
+    : `Every visit has a $${minCharge} floor (covers travel + diagnosis). Free written quote on every job.`);
 
   return (
     <div className="bg-white">
@@ -75,22 +78,30 @@ export default function LandingPage() {
 
             <div className="lg:col-span-5">
               <div className="border-2 border-black bg-white">
-                <div className="grid grid-cols-2 divide-x-2 divide-black border-b-2 border-black">
-                  <div className="p-6">
-                    <div className="overline text-neutral-500">Per swap</div>
-                    <div className="font-display text-5xl tracking-tighter mt-1">${outletPrice}</div>
-                    <div className="overline mt-1">Switch / outlet</div>
+                {showOutletCard ? (
+                  <div className="grid grid-cols-2 divide-x-2 divide-black border-b-2 border-black">
+                    <div className="p-6">
+                      <div className="overline text-neutral-500">Per swap</div>
+                      <div className="font-display text-5xl tracking-tighter mt-1">${outletPrice}</div>
+                      <div className="overline mt-1">Switch / outlet</div>
+                    </div>
+                    <div className="p-6 bg-[#FFD600]">
+                      <div className="overline">Visit minimum</div>
+                      <div className="font-display text-5xl tracking-tighter mt-1">${minCharge}</div>
+                      <div className="overline mt-1">On every job</div>
+                    </div>
                   </div>
-                  <div className="p-6 bg-[#FFD600]">
+                ) : (
+                  <div className="p-7 bg-[#FFD600] border-b-2 border-black">
                     <div className="overline">Visit minimum</div>
-                    <div className="font-display text-5xl tracking-tighter mt-1">${minCharge}</div>
-                    <div className="overline mt-1">On every job</div>
+                    <div className="font-display text-6xl tracking-tighter mt-1">${minCharge}</div>
+                    <div className="overline mt-1">Per visit · covers travel + diagnosis</div>
                   </div>
-                </div>
+                )}
                 <div className="p-6">
-                  <div className="overline text-neutral-500">All other work</div>
+                  <div className="overline text-neutral-500">Every job</div>
                   <div className="font-display text-2xl tracking-tight mt-1">Free quote in 24 hrs</div>
-                  <p className="text-sm text-neutral-600 mt-2">Snap a photo, drop a description. We'll send back a fixed-price quote.</p>
+                  <p className="text-sm text-neutral-600 mt-2">Snap a photo, drop a description, pick a time. We'll send back a fixed-price quote.</p>
                   <Link to="/request" className="btn-brutal dark w-full justify-center mt-5" data-testid="hero-quote-btn">
                     {s.cta_primary_label} <ArrowRight className="w-4 h-4" />
                   </Link>

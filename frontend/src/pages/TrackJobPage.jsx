@@ -104,6 +104,12 @@ export default function TrackJobPage() {
             <div className="overline">Quote</div>
             <div className="font-display text-5xl tracking-tighter mt-1">${job.quoted_amount.toFixed(2)}</div>
             <div className="overline mt-1">Final price · $50 visit minimum applies</div>
+            {job.preferred_date && (
+              <>
+                <div className="overline mt-4">Preferred time</div>
+                <div className="text-sm mt-1">{job.preferred_date} · {job.preferred_time_slot}</div>
+              </>
+            )}
             <div className="overline mt-4">Submitted</div>
             <div className="text-sm">{new Date(job.created_at).toLocaleString()}</div>
           </div>

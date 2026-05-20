@@ -347,7 +347,7 @@ class TestSiteSettingsAndMinimumCharge:
         assert r.status_code == 200
         d = r.json()
         assert d.get("minimum_charge") == 50.0
-        assert d.get("outlet_price") == 25.0
+        assert d.get("outlet_price") == 0.0  # owner removed the $25 set price; only minimum applies
 
     def test_outlet_job_priced_at_25(self):
         # outlet/switch service => $25 fixed (above minimum logic still kicks in but base=25, minimum=50 → quoted=max(25,50)=50)

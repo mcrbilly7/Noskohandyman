@@ -1,46 +1,46 @@
-# Nosko Handyman — PRD (Iter 5)
+# Nosko Handyman — PRD (Iter 6)
 
-## Iter 5 — Solo handyman pivot
-- Removed worker/marketer signup flows and links from public site (kept backend collections/endpoints dormant).
-- Simplified nav: Services / How it works / Get a quote. Single CTA: "Get a quote".
-- Admin tabs reduced to: **Quote requests · Team · Portfolio · Edit website**.
-- "Edit website" expanded into a full site editor: brand & contact (incl. website_domain), hero copy + CTAs, services tiles (add/remove/edit each), how-it-works steps (add/remove/edit), programs copy (kept on backend for future), final CTA, footer tagline.
-- Landing page is now 100% driven by site_settings — no hardcoded copy.
-- Job request page no longer asks for referral code.
-- AccountSettings cleaned up (removed Stripe Connect card since no workers/marketers).
-- LandingPage now renders with safe defaults if /api/site/settings is slow/fails — **no more infinite loading**.
-- Added 20s axios timeout so calls fail fast instead of hanging.
-- All 81 backend regression tests still pass.
+## Iter 6 changes
+- **Removed $25 set-price entirely** from defaults: `outlet_price` default is now `0` (= hidden on landing & request pages). Visit minimum stays at $50.
+- **Landing**: single bold "$50 Visit minimum" card replaces the two-card layout. Updated subtitle, "Anything a handyman does — we do." section heading, services tile copy (no more "$25 flat").
+- **Calendar / time-slot picker on quote request**:
+  - Customer picks a date (no past dates) + time window (Morning / Afternoon / Evening / Flexible).
+  - Backend stores `preferred_date` (ISO date string) + `preferred_time_slot` on the job.
+  - Public tracking page shows scheduled time.
+  - Admin job row displays preferred time as a black/yellow chip.
+- **Sparse settings doc**: `GET /api/site/settings` now merges stored values over `SiteSettings()` defaults — so admin edits can be sparse and missing fields fall back gracefully (fixes the "blank hero / blank CTA" bug).
+- All 81/81 backend tests pass.
 
-## Production deployment
-- Custom domain (preview & prod):
-  - PREVIEW: https://nosko-handyman.preview.emergentagent.com
-  - PRODUCTION: https://noskotx.com (deployed via Emergent platform)
-- Production frontend env (REACT_APP_BACKEND_URL) must point to the deployed production backend, not the preview URL.
-- Production backend env must include SMTP_*, STRIPE_API_KEY, FOUNDING_ADMINS, EMERGENT_LLM_KEY copied from preview.
+## Editable from admin "Edit website" tab
+- Hero title/subtitle + CTA labels
+- Visit minimum $ and outlet/swap $ (set outlet=0 to hide that card)
+- Services tiles (add/edit/remove)
+- How-it-works steps (add/edit/remove)
+- Section headings & overlines
+- Programs copy (dormant on landing, kept for future)
+- Final CTA strip + footer tagline
+- Website domain, contact phone & email, service area
 
 ## Cumulative feature set (current)
-- Public landing page (Hero / Services / How it works / Portfolio / Final CTA / Footer) - 100% editable from admin
-- Anonymous quote request flow with photo upload
-- Public job tracking page at `/track/:jobId`
+- Cleaner DFW marketing site: Hero / Services / How / Portfolio / Final CTA / Footer — all editable
+- **Anonymous quote request** with photo upload + **calendar & time-slot picker**
+- **Public job tracking page** `/track/:jobId` showing status, ETA, scheduled time, address, quote
 - Hybrid auth: Google OAuth + email/password + forgot/reset password
-- Founding admins auto-promoted: noskotx@gmail.com, nossonkosowsky32@gmail.com
-- Admin "Team" tab (founder-only role management)
-- Account settings (every user)
-- Full site editor (admin "Edit website" tab)
-- Real Gmail SMTP transactional emails: welcome / quote-request to company / customer confirmation w/ track link / password reset
-- Auto-payouts on job completion (dormant — no workers/marketers signing up via UI now; still callable via API if needed)
-- Stripe Connect endpoints intact (dormant)
+- Founding admins (`noskotx@gmail.com`, `nossonkosowsky32@gmail.com`) auto-promoted; founder-only role management in admin "Team" tab
+- Account settings page for every user
+- Admin: Quote requests / Team / Portfolio / Edit website
+- Gmail SMTP transactional emails (welcome, quote-request to owner, customer confirmation w/ track link, password reset)
+- Stripe Connect + auto-payouts logic remain in backend (dormant)
 
-## Backlog (P0 → P2)
+## Action items for owner (production)
+- **Redeploy** to push iter5 + iter6 changes to https://noskotx.com.
+- Enable Stripe Connect at https://dashboard.stripe.com/connect (if/when re-introducing payouts).
+- DNS / custom domain steps in the previous summary.
+
+## Backlog
 - **P1**: Pydantic models on POST endpoints (raw dict → 500 on missing fields).
-- **P1**: Move SMTP to FastAPI BackgroundTasks (currently adds ~3s latency to POST /jobs).
-- **P2**: Customer SMS notifications via Twilio.
-- **P2**: TTL index on user_sessions.expires_at.
-- **P2**: Split server.py into modules.
-- **P2 (optional)**: Remove dormant worker/marketer/payout backend endpoints if owner confirms permanent solo-handyman model.
-
-## Notes for future sessions
-- The admin "Edit website" tab is the source of truth for landing page copy. Owner can edit everything from there.
-- All admin tabs work as designed; founder edits visible only to noskotx@gmail.com and nossonkosowsky32@gmail.com.
-- If owner wants worker/marketer back, just restore the routes in `/app/frontend/src/App.js` and re-link from nav/landing.
+- **P1**: Move SMTP to FastAPI BackgroundTasks (sync sends add ~3s latency).
+- **P2**: SMS notifications via Twilio (DFW homeowners are texters).
+- **P2**: Customer-facing "edit my scheduled time" link in confirmation email.
+- **P2**: Admin can override preferred time + auto-send "scheduled for X" email.
+- **P2**: Remove dormant worker/marketer/payout backend endpoints if owner confirms permanent solo-handyman model.

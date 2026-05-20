@@ -200,7 +200,7 @@ def get_object(path: str):
 class SiteSettings(BaseModel):
     # Hero
     hero_title: str = "Full handyman service, fixed honest pricing."
-    hero_subtitle: str = "$25 per switch/outlet swap. $50 minimum per visit (covers travel + diagnosis). DFW Metroplex."
+    hero_subtitle: str = "Free quote in 24 hrs. $50 minimum per visit (covers travel + diagnosis). DFW Metroplex."
     cta_primary_label: str = "Get a free quote"
     cta_secondary_label: str = "See what we do"
 
@@ -209,7 +209,7 @@ class SiteSettings(BaseModel):
     contact_email: str = "noskotx@gmail.com"
     service_area: str = "DFW Metroplex"
     minimum_charge: float = 50.0
-    outlet_price: float = 25.0
+    outlet_price: float = 0.0  # 0 = hidden on landing/request pages
     website_domain: str = "noskotx.com"
 
     # Section headings
@@ -226,7 +226,7 @@ class SiteSettings(BaseModel):
 
     # Lists
     services: List[dict] = [
-        {"title": "Electrical small jobs", "description": "Switches, outlets, fixtures. $25 flat on swaps."},
+        {"title": "Electrical small jobs", "description": "Switches, outlets, fixtures, simple wiring."},
         {"title": "Plumbing fixes", "description": "Faucets, leaks, toilet swaps, garbage disposals."},
         {"title": "Drywall & paint", "description": "Patch holes, retouch, full rooms — quoted."},
         {"title": "Carpentry & install", "description": "Doors, shelves, mounts, appliance install."},
@@ -237,8 +237,8 @@ class SiteSettings(BaseModel):
     ]
     how_it_works: List[dict] = [
         {"title": "Send a photo", "description": "Upload a picture of the job. Add the address."},
-        {"title": "Get a quote", "description": "We reply with a fixed-price quote — or our $25 set price for outlet/switch."},
-        {"title": "Job done", "description": "$50 minimum. No surprises. Pay when complete."},
+        {"title": "Get a quote", "description": "We reply with a fixed-price quote — fast."},
+        {"title": "Job done", "description": "$50 minimum per visit. No surprises. Pay when complete."},
     ]
 
     # Programs
@@ -250,7 +250,7 @@ class SiteSettings(BaseModel):
     marketer_program_cta: str = "Join as marketer"
 
     # Footer
-    footer_tagline: str = "Full-service handyman based in the DFW Metroplex. $25 set price on switch/outlet swaps. $50 minimum on every job. W9 / 1099 compliant."
+    footer_tagline: str = "Full-service handyman based in the DFW Metroplex. $50 minimum per visit. W9 / 1099 compliant."
 
 
 # -------------------- Helpers --------------------
@@ -703,10 +703,8 @@ async def create_job(payload: dict, request: Request):
             referral_code = None
     settings_doc = await db.site_settings.find_one({"key": "default"}, {"_id": 0, "key": 0})
     minimum = float((settings_doc or {}).get("minimum_charge", 50.0))
-    outlet = float((settings_doc or {}).get("outlet_price", 25.0))
-    service_type = payload.get("service_type", "Switch/Outlet Replacement")
-    base = outlet if "switch" in service_type.lower() or "outlet" in service_type.lower() else minimum
-    quoted = max(float(payload.get("quoted_amount") or base), minimum)
+    service_type = payload.get("service_type", "General Handyman")
+    quoted = max(float(payload.get("quoted_amount") or minimum), minimum)
     job = {
         "job_id": f"job_{uuid.uuid4().hex[:10]}",
         "customer_name": payload["customer_name"],
@@ -717,6 +715,8 @@ async def create_job(payload: dict, request: Request):
         "description": payload.get("description", ""),
         "photo_paths": payload.get("photo_paths", []),
         "referral_code": referral_code,
+        "preferred_date": payload.get("preferred_date"),
+        "preferred_time_slot": payload.get("preferred_time_slot"),
         "quoted_amount": quoted,
         "status": "new",
         "assigned_worker_id": None,
@@ -784,6 +784,8 @@ async def track_job(job_id: str):
         "eta_message": eta_map.get(job["status"], ""),
         "quoted_amount": job["quoted_amount"],
         "assigned_worker_name": worker_name,
+        "preferred_date": job.get("preferred_date"),
+        "preferred_time_slot": job.get("preferred_time_slot"),
         "created_at": job["created_at"],
         "photo_paths": job.get("photo_paths", []),
     }
@@ -1110,9 +1112,18 @@ async def portfolio_delete(photo_id: str, _: dict = Depends(require_admin)):
 @api.get("/site/settings")
 async def get_site_settings():
     s = await db.site_settings.find_one({"key": "default"}, {"_id": 0, "key": 0})
+    defaults = SiteSettings().model_dump()
     if not s:
-        s = SiteSettings().model_dump()
-    return s
+        return defaults
+    # Merge stored values over defaults (skip None / empty-string overrides for required scalar copy fields)
+    merged = {**defaults}
+    for k, v in s.items():
+        if v is None:
+            continue
+        if isinstance(v, str) and not v.strip() and k not in ("services_subheading",):
+            continue
+        merged[k] = v
+    return merged
 
 
 @api.put("/site/settings")
