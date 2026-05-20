@@ -297,50 +297,125 @@ function SiteSettingsEditor({ settings, onSave }) {
   const [form, setForm] = useState(settings);
   useEffect(() => { setForm(settings); }, [settings]);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const setNum = (k) => (e) => setForm({ ...form, [k]: parseFloat(e.target.value) });
+  const setItem = (listKey, idx, field) => (e) => {
+    const list = [...(form[listKey] || [])];
+    list[idx] = { ...list[idx], [field]: e.target.value };
+    setForm({ ...form, [listKey]: list });
+  };
+  const addItem = (listKey, template) => () => {
+    setForm({ ...form, [listKey]: [...(form[listKey] || []), template] });
+  };
+  const removeItem = (listKey, idx) => () => {
+    const list = [...(form[listKey] || [])];
+    list.splice(idx, 1);
+    setForm({ ...form, [listKey]: list });
+  };
   const save = async (e) => {
     e.preventDefault();
-    try {
-      const payload = { ...form };
-      if (payload.minimum_charge !== undefined) payload.minimum_charge = parseFloat(payload.minimum_charge);
-      if (payload.outlet_price !== undefined) payload.outlet_price = parseFloat(payload.outlet_price);
-      await api.put("/site/settings", payload); toast.success("Saved"); onSave?.();
-    } catch { toast.error("Save failed"); }
+    try { await api.put("/site/settings", form); toast.success("Saved — landing page updated"); onSave?.(); }
+    catch { toast.error("Save failed"); }
   };
+  if (!form) return null;
+
+  const Section = ({ title, children }) => (
+    <div className="border-2 border-black bg-white p-6 grid gap-4">
+      <div className="overline border-b border-black pb-2">{title}</div>
+      {children}
+    </div>
+  );
+
   return (
-    <form onSubmit={save} className="border-2 border-black p-6 bg-white grid gap-4 max-w-2xl" data-testid="admin-settings-form">
-      <div>
-        <label className="overline">Hero title</label>
-        <input value={form.hero_title || ""} onChange={set("hero_title")} data-testid="settings-hero-title" />
+    <form onSubmit={save} className="grid gap-6" data-testid="admin-settings-form">
+      <Section title="Brand & contact">
+        <div className="grid md:grid-cols-2 gap-4">
+          <div><label className="overline">Website domain</label><input value={form.website_domain || ""} onChange={set("website_domain")} data-testid="settings-domain" /></div>
+          <div><label className="overline">Service area</label><input value={form.service_area || ""} onChange={set("service_area")} data-testid="settings-area" /></div>
+          <div><label className="overline">Contact phone</label><input value={form.contact_phone || ""} onChange={set("contact_phone")} data-testid="settings-phone" /></div>
+          <div><label className="overline">Contact email</label><input value={form.contact_email || ""} onChange={set("contact_email")} data-testid="settings-email" /></div>
+          <div><label className="overline">Outlet/switch price ($)</label><input type="number" min="0" step="0.01" value={form.outlet_price ?? 25} onChange={setNum("outlet_price")} data-testid="settings-outlet" /></div>
+          <div><label className="overline">Visit minimum ($)</label><input type="number" min="0" step="0.01" value={form.minimum_charge ?? 50} onChange={setNum("minimum_charge")} data-testid="settings-min" /></div>
+        </div>
+      </Section>
+
+      <Section title="Hero (top of landing page)">
+        <div><label className="overline">Hero title</label><input value={form.hero_title || ""} onChange={set("hero_title")} data-testid="settings-hero-title" /></div>
+        <div><label className="overline">Hero subtitle</label><textarea rows={2} value={form.hero_subtitle || ""} onChange={set("hero_subtitle")} data-testid="settings-hero-sub" /></div>
+        <div className="grid md:grid-cols-2 gap-4">
+          <div><label className="overline">Primary CTA label</label><input value={form.cta_primary_label || ""} onChange={set("cta_primary_label")} data-testid="settings-cta-primary" /></div>
+          <div><label className="overline">Secondary CTA label</label><input value={form.cta_secondary_label || ""} onChange={set("cta_secondary_label")} data-testid="settings-cta-secondary" /></div>
+        </div>
+      </Section>
+
+      <Section title="Services section">
+        <div className="grid md:grid-cols-3 gap-4">
+          <div><label className="overline">Overline</label><input value={form.services_overline || ""} onChange={set("services_overline")} /></div>
+          <div className="md:col-span-2"><label className="overline">Heading</label><input value={form.services_heading || ""} onChange={set("services_heading")} /></div>
+        </div>
+        <div><label className="overline">Custom subheading (optional)</label><textarea rows={2} value={form.services_subheading || ""} onChange={set("services_subheading")} placeholder="Leave empty to auto-generate from $ amounts" /></div>
+        <div>
+          <div className="overline mb-2">Service tiles ({(form.services || []).length})</div>
+          <div className="grid gap-3">
+            {(form.services || []).map((sv, i) => (
+              <div key={i} className="grid grid-cols-[1fr_2fr_auto] gap-2 items-start" data-testid={`service-row-${i}`}>
+                <input placeholder="Title" value={sv.title || ""} onChange={setItem("services", i, "title")} data-testid={`service-title-${i}`} />
+                <input placeholder="Description" value={sv.description || ""} onChange={setItem("services", i, "description")} data-testid={`service-desc-${i}`} />
+                <button type="button" className="overline border border-black px-2 py-1 hover:bg-red-50" onClick={removeItem("services", i)} data-testid={`service-del-${i}`}>×</button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="btn-brutal ghost mt-3" onClick={addItem("services", { title: "", description: "" })} data-testid="add-service-btn">+ Add service</button>
+        </div>
+      </Section>
+
+      <Section title="How it works">
+        <div className="grid md:grid-cols-2 gap-4">
+          <div><label className="overline">Overline</label><input value={form.how_overline || ""} onChange={set("how_overline")} /></div>
+          <div><label className="overline">Heading</label><input value={form.how_heading || ""} onChange={set("how_heading")} /></div>
+        </div>
+        <div className="grid gap-3">
+          {(form.how_it_works || []).map((step, i) => (
+            <div key={i} className="grid grid-cols-[1fr_2fr_auto] gap-2 items-start" data-testid={`step-row-${i}`}>
+              <input placeholder="Step title" value={step.title || ""} onChange={setItem("how_it_works", i, "title")} data-testid={`step-title-${i}`} />
+              <input placeholder="Step description" value={step.description || ""} onChange={setItem("how_it_works", i, "description")} data-testid={`step-desc-${i}`} />
+              <button type="button" className="overline border border-black px-2 py-1 hover:bg-red-50" onClick={removeItem("how_it_works", i)}>×</button>
+            </div>
+          ))}
+        </div>
+        <button type="button" className="btn-brutal ghost mt-1" onClick={addItem("how_it_works", { title: "", description: "" })}>+ Add step</button>
+      </Section>
+
+      <Section title="Programs section">
+        <div className="grid md:grid-cols-2 gap-4">
+          <div><label className="overline">Overline</label><input value={form.programs_overline || ""} onChange={set("programs_overline")} /></div>
+          <div><label className="overline">Heading</label><input value={form.programs_heading || ""} onChange={set("programs_heading")} /></div>
+        </div>
+        <div className="border border-black p-4 grid gap-3">
+          <div className="overline">Worker program card</div>
+          <div><label className="overline">Title</label><input value={form.worker_program_title || ""} onChange={set("worker_program_title")} /></div>
+          <div><label className="overline">Body</label><textarea rows={2} value={form.worker_program_body || ""} onChange={set("worker_program_body")} /></div>
+          <div><label className="overline">CTA button label</label><input value={form.worker_program_cta || ""} onChange={set("worker_program_cta")} /></div>
+        </div>
+        <div className="border border-black p-4 grid gap-3 bg-[#FFFBE6]">
+          <div className="overline">Marketer program card</div>
+          <div><label className="overline">Title</label><input value={form.marketer_program_title || ""} onChange={set("marketer_program_title")} /></div>
+          <div><label className="overline">Body</label><textarea rows={2} value={form.marketer_program_body || ""} onChange={set("marketer_program_body")} /></div>
+          <div><label className="overline">CTA button label</label><input value={form.marketer_program_cta || ""} onChange={set("marketer_program_cta")} /></div>
+        </div>
+      </Section>
+
+      <Section title="Final CTA strip + Footer">
+        <div className="grid md:grid-cols-3 gap-4">
+          <div><label className="overline">Overline</label><input value={form.final_cta_overline || ""} onChange={set("final_cta_overline")} /></div>
+          <div><label className="overline">Heading</label><input value={form.final_cta_heading || ""} onChange={set("final_cta_heading")} /></div>
+          <div><label className="overline">Button label</label><input value={form.final_cta_label || ""} onChange={set("final_cta_label")} /></div>
+        </div>
+        <div><label className="overline">Footer tagline</label><textarea rows={2} value={form.footer_tagline || ""} onChange={set("footer_tagline")} /></div>
+      </Section>
+
+      <div className="sticky bottom-4 z-10 flex justify-end">
+        <button className="btn-brutal dark" data-testid="settings-save-btn">Save all changes</button>
       </div>
-      <div>
-        <label className="overline">Hero subtitle</label>
-        <textarea rows={2} value={form.hero_subtitle || ""} onChange={set("hero_subtitle")} data-testid="settings-hero-sub" />
-      </div>
-      <div className="grid md:grid-cols-2 gap-4">
-        <div>
-          <label className="overline">Contact phone</label>
-          <input value={form.contact_phone || ""} onChange={set("contact_phone")} data-testid="settings-phone" />
-        </div>
-        <div>
-          <label className="overline">Contact email</label>
-          <input value={form.contact_email || ""} onChange={set("contact_email")} data-testid="settings-email" />
-        </div>
-      </div>
-      <div className="grid md:grid-cols-3 gap-4">
-        <div>
-          <label className="overline">Service area</label>
-          <input value={form.service_area || ""} onChange={set("service_area")} data-testid="settings-area" />
-        </div>
-        <div>
-          <label className="overline">Outlet/switch price ($)</label>
-          <input type="number" min="0" step="0.01" value={form.outlet_price ?? 25} onChange={set("outlet_price")} data-testid="settings-outlet" />
-        </div>
-        <div>
-          <label className="overline">Job minimum ($)</label>
-          <input type="number" min="0" step="0.01" value={form.minimum_charge ?? 50} onChange={set("minimum_charge")} data-testid="settings-min" />
-        </div>
-      </div>
-      <button className="btn-brutal dark" data-testid="settings-save-btn">Save settings</button>
     </form>
   );
 }

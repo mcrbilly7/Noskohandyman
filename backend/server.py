@@ -198,13 +198,59 @@ def get_object(path: str):
 
 # -------------------- Models --------------------
 class SiteSettings(BaseModel):
+    # Hero
     hero_title: str = "Full handyman service, fixed honest pricing."
     hero_subtitle: str = "$25 per switch/outlet swap. $50 minimum per visit (covers travel + diagnosis). DFW Metroplex."
+    cta_primary_label: str = "Get a free quote"
+    cta_secondary_label: str = "See what we do"
+
+    # Contact / brand
     contact_phone: str = "(555) 123-4567"
     contact_email: str = "noskotx@gmail.com"
     service_area: str = "DFW Metroplex"
     minimum_charge: float = 50.0
     outlet_price: float = 25.0
+    website_domain: str = "noskotx.com"
+
+    # Section headings
+    services_overline: str = "What we fix"
+    services_heading: str = "Anything a handyman does — we do."
+    services_subheading: str = ""
+    how_overline: str = "How it works"
+    how_heading: str = "Three steps. Zero phone tag."
+    programs_overline: str = "Work with us"
+    programs_heading: str = "Earn with Nosko."
+    final_cta_overline: str = "Ready to book?"
+    final_cta_heading: str = "Send a photo. Get a quote."
+    final_cta_label: str = "Request now"
+
+    # Lists
+    services: List[dict] = [
+        {"title": "Electrical small jobs", "description": "Switches, outlets, fixtures. $25 flat on swaps."},
+        {"title": "Plumbing fixes", "description": "Faucets, leaks, toilet swaps, garbage disposals."},
+        {"title": "Drywall & paint", "description": "Patch holes, retouch, full rooms — quoted."},
+        {"title": "Carpentry & install", "description": "Doors, shelves, mounts, appliance install."},
+        {"title": "Tile & flooring", "description": "Repairs, replacements, transitions."},
+        {"title": "Outdoor & yard", "description": "Fence patch, deck boards, light landscaping."},
+        {"title": "Furniture assembly", "description": "Flat-pack, mounts, brackets — quick & clean."},
+        {"title": "Other", "description": "If a handyman does it, we do it. Just ask."},
+    ]
+    how_it_works: List[dict] = [
+        {"title": "Send a photo", "description": "Upload a picture of the job. Add the address."},
+        {"title": "Get a quote", "description": "We reply with a fixed-price quote — or our $25 set price for outlet/switch."},
+        {"title": "Job done", "description": "$50 minimum. No surprises. Pay when complete."},
+    ]
+
+    # Programs
+    worker_program_title: str = "Handymen wanted"
+    worker_program_body: str = "Set your hours. Pick your skills. W9 / 1099 with weekly payouts and a full earnings dashboard."
+    worker_program_cta: str = "Apply as handyman"
+    marketer_program_title: str = "Marketer program — 15% share"
+    marketer_program_body: str = "Sign up, get a personal referral code. Every booking with your code earns you 15% — paid weekly."
+    marketer_program_cta: str = "Join as marketer"
+
+    # Footer
+    footer_tagline: str = "Full-service handyman based in the DFW Metroplex. $25 set price on switch/outlet swaps. $50 minimum on every job. W9 / 1099 compliant."
 
 
 # -------------------- Helpers --------------------
