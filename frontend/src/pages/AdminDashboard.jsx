@@ -4,7 +4,7 @@ import { api, fileUrl } from "@/lib/api";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import FileUploader from "@/components/shared/FileUploader";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Image as ImageIcon, Trash2, Send, DollarSign, ShieldAlert } from "lucide-react";
+import { Image as ImageIcon, Trash2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 
 const FOUNDING_EMAILS = ["noskotx@gmail.com", "nossonkosowsky32@gmail.com"];
@@ -13,8 +13,6 @@ export default function AdminDashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState({});
   const [jobs, setJobs] = useState([]);
-  const [workers, setWorkers] = useState([]);
-  const [marketers, setMarketers] = useState([]);
   const [users, setUsers] = useState([]);
   const [portfolio, setPortfolio] = useState([]);
   const [settings, setSettings] = useState({});
@@ -24,8 +22,6 @@ export default function AdminDashboard() {
   const refreshAll = () => {
     api.get("/admin/stats").then((r) => setStats(r.data)).catch(() => {});
     api.get("/jobs").then((r) => setJobs(r.data || [])).catch(() => {});
-    api.get("/workers").then((r) => setWorkers(r.data || [])).catch(() => {});
-    api.get("/marketers").then((r) => setMarketers(r.data || [])).catch(() => {});
     api.get("/admin/users").then((r) => setUsers(r.data || [])).catch(() => {});
     api.get("/portfolio").then((r) => setPortfolio(r.data || [])).catch(() => {});
     api.get("/site/settings").then((r) => setSettings(r.data)).catch(() => {});
@@ -33,21 +29,9 @@ export default function AdminDashboard() {
 
   useEffect(() => { refreshAll(); }, []);
 
-  const assignWorker = async (jobId, workerId) => {
-    if (!workerId) return;
-    try { await api.put(`/jobs/${jobId}/assign`, { worker_id: workerId }); toast.success("Assigned"); refreshAll(); }
-    catch { toast.error("Assign failed"); }
-  };
   const setStatus = async (jobId, status) => {
     try { await api.put(`/jobs/${jobId}/status`, { status }); toast.success("Updated"); refreshAll(); }
     catch { toast.error("Update failed"); }
-  };
-  const payUser = async (userId, type) => {
-    const amt = prompt("Amount to pay (USD):");
-    if (!amt) return;
-    const note = prompt("Note (optional):") || "";
-    try { await api.post("/payouts", { user_id: userId, amount: parseFloat(amt), type, note, method: "stripe" }); toast.success("Payout recorded"); refreshAll(); }
-    catch { toast.error("Payout failed"); }
   };
   const changeRole = async (uid, role) => {
     try { await api.put(`/admin/users/${uid}/role`, { role }); toast.success("Role updated"); refreshAll(); }
@@ -60,13 +44,11 @@ export default function AdminDashboard() {
         <div className="overline">Admin</div>
         <h1 className="font-display text-4xl tracking-tighter mt-1" data-testid="admin-title">Command center</h1>
 
-        <div className="grid md:grid-cols-6 gap-0 border border-black mt-6" data-testid="admin-stats">
+        <div className="grid md:grid-cols-4 gap-0 border border-black mt-6" data-testid="admin-stats">
           {[
             { l: "New jobs", v: stats.jobs_new || 0, hl: true },
             { l: "Total jobs", v: stats.jobs_total || 0 },
             { l: "Completed", v: stats.jobs_completed || 0 },
-            { l: "Workers", v: stats.workers || 0 },
-            { l: "Marketers", v: stats.marketers || 0 },
             { l: "All users", v: stats.users_total || 0 },
           ].map((c) => (
             <div key={c.l} className={`p-5 border-r border-black last:border-r-0 ${c.hl ? "bg-[#FFD600]" : "bg-white"}`}>
@@ -79,8 +61,7 @@ export default function AdminDashboard() {
         <Tabs defaultValue="jobs" className="mt-8">
           <TabsList className="bg-black text-white rounded-none border-2 border-black p-0 h-auto flex flex-wrap">
             {[
-              ["jobs", "Jobs"], ["workers", "Workers"], ["marketers", "Marketers"],
-              ["team", "Team"], ["portfolio", "Portfolio"], ["settings", "Settings"],
+              ["jobs", "Quote requests"], ["team", "Team"], ["portfolio", "Portfolio"], ["settings", "Edit website"],
             ].map(([v, l]) => (
               <TabsTrigger key={v} value={v} className="rounded-none data-[state=active]:bg-[#FFD600] data-[state=active]:text-black overline px-4 py-2" data-testid={`tab-${v}`}>{l}</TabsTrigger>
             ))}
@@ -104,19 +85,15 @@ export default function AdminDashboard() {
                         <div className="text-sm text-neutral-600">{j.customer_email} · {j.customer_phone || "—"}</div>
                         <div className="text-sm mt-1">{j.address}</div>
                         <p className="text-sm mt-2 max-w-prose">{j.description}</p>
-                        {j.referral_code && <span className="overline text-[10px] inline-block mt-2 bg-[#FFD600] border border-black px-2 py-0.5">ref · {j.referral_code}</span>}
                       </div>
                       <div className="lg:col-span-3">
-                        <div className="overline">Assign worker</div>
-                        <select className="mt-1" onChange={(e) => assignWorker(j.job_id, e.target.value)} value={j.assigned_worker_id || ""} data-testid={`assign-${j.job_id}`}>
-                          <option value="">{j.assigned_worker_id ? "Change…" : "Select worker"}</option>
-                          {workers.map((w) => (
-                            <option key={w.user_id} value={w.user_id}>{w.user?.name || w.user?.email} — {w.location || "n/a"}</option>
-                          ))}
-                        </select>
-                        <select className="mt-2" onChange={(e) => setStatus(j.job_id, e.target.value)} value={j.status} data-testid={`status-${j.job_id}`}>
+                        <div className="overline">Update status</div>
+                        <select className="mt-1" onChange={(e) => setStatus(j.job_id, e.target.value)} value={j.status} data-testid={`status-${j.job_id}`}>
                           <option value="new">new</option><option value="assigned">assigned</option><option value="in_progress">in_progress</option><option value="completed">completed</option><option value="cancelled">cancelled</option>
                         </select>
+                        <a href={`/track/${j.job_id}`} target="_blank" rel="noreferrer" className="overline text-[10px] underline mt-2 inline-block" data-testid={`track-link-${j.job_id}`}>
+                          View customer tracking page →
+                        </a>
                       </div>
                       <div className="lg:col-span-2 text-right">
                         <div className="overline">Quote</div>
@@ -126,66 +103,6 @@ export default function AdminDashboard() {
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="workers" className="mt-4">
-            <div className="border-2 border-black bg-white" data-testid="admin-workers-section">
-              {workers.length === 0 ? <p className="p-6 text-sm text-neutral-500">No workers yet.</p> : (
-                <table className="w-full text-sm">
-                  <thead className="bg-[#F9FAFB] overline text-[10px]">
-                    <tr><th className="p-3 text-left">Worker</th><th className="p-3 text-left">Skills</th><th className="p-3 text-left">Location</th><th className="p-3 text-left">Hrs/wk</th><th className="p-3 text-right">Action</th></tr>
-                  </thead>
-                  <tbody>
-                    {workers.map((w) => (
-                      <tr key={w.user_id} className="border-t border-neutral-200">
-                        <td className="p-3">
-                          <div className="font-display tracking-tight">{w.user?.name}</div>
-                          <div className="font-mono text-xs text-neutral-500">{w.user?.email}</div>
-                        </td>
-                        <td className="p-3 text-xs">{(w.skills || []).join(", ")}</td>
-                        <td className="p-3">{w.location || "—"}</td>
-                        <td className="p-3 font-mono">{w.hours_per_week || "—"}</td>
-                        <td className="p-3 text-right">
-                          <button className="btn-brutal" onClick={() => payUser(w.user_id, "work")} data-testid={`pay-worker-${w.user_id}`}>
-                            <DollarSign className="w-4 h-4" /> Pay
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="marketers" className="mt-4">
-            <div className="border-2 border-black bg-white" data-testid="admin-marketers-section">
-              {marketers.length === 0 ? <p className="p-6 text-sm text-neutral-500">No marketers yet.</p> : (
-                <table className="w-full text-sm">
-                  <thead className="bg-[#F9FAFB] overline text-[10px]">
-                    <tr><th className="p-3 text-left">Marketer</th><th className="p-3 text-left">Code</th><th className="p-3 text-left">Location</th><th className="p-3 text-left">Referrals</th><th className="p-3 text-right">Action</th></tr>
-                  </thead>
-                  <tbody>
-                    {marketers.map((m) => (
-                      <tr key={m.user_id} className="border-t border-neutral-200">
-                        <td className="p-3">
-                          <div className="font-display tracking-tight">{m.user?.name}</div>
-                          <div className="font-mono text-xs text-neutral-500">{m.user?.email}</div>
-                        </td>
-                        <td className="p-3 font-mono">{m.referral_code}</td>
-                        <td className="p-3">{m.location || "—"}</td>
-                        <td className="p-3 font-mono">{m.referral_count}</td>
-                        <td className="p-3 text-right">
-                          <button className="btn-brutal" onClick={() => payUser(m.user_id, "referral")} data-testid={`pay-marketer-${m.user_id}`}>
-                            <Send className="w-4 h-4" /> Pay
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               )}
             </div>
           </TabsContent>

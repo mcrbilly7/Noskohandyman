@@ -35,8 +35,6 @@ export default function Footer({ settings: passedSettings }) {
           <div className="overline mb-3 text-neutral-500">Company</div>
           <ul className="space-y-1.5 text-sm">
             <li><Link to="/request">Request a quote</Link></li>
-            <li><Link to="/join/worker">Become a handyman</Link></li>
-            <li><Link to="/join/marketer">Marketer program</Link></li>
             <li><Link to="/login">Sign in</Link></li>
           </ul>
         </div>

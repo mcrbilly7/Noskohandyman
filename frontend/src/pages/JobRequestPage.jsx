@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import React, { useState } from "react";
 import { api } from "@/lib/api";
 import Navbar from "@/components/shared/Navbar";
 import Footer from "@/components/shared/Footer";
@@ -8,11 +7,9 @@ import { CheckCircle2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function JobRequestPage() {
-  const [params] = useSearchParams();
   const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
-  const [refStatus, setRefStatus] = useState(null);
   const [form, setForm] = useState({
     customer_name: "",
     customer_email: "",
@@ -20,19 +17,7 @@ export default function JobRequestPage() {
     address: "",
     service_type: "Switch/Outlet Replacement",
     description: "",
-    referral_code: (params.get("ref") || "").toUpperCase(),
   });
-
-  useEffect(() => {
-    if (!form.referral_code) { setRefStatus(null); return; }
-    const t = setTimeout(async () => {
-      try {
-        const r = await api.get(`/referral/${form.referral_code}`);
-        setRefStatus(r.data);
-      } catch { setRefStatus({ valid: false }); }
-    }, 300);
-    return () => clearTimeout(t);
-  }, [form.referral_code]);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -126,21 +111,6 @@ export default function JobRequestPage() {
             <div>
               <label className="overline">Photo of the job *</label>
               <FileUploader folder="jobs" value={photos} onChange={setPhotos} testid="job-photos" />
-            </div>
-            <div>
-              <label className="overline">Referral code (optional)</label>
-              <input
-                value={form.referral_code}
-                onChange={(e) => setForm({ ...form, referral_code: e.target.value.toUpperCase() })}
-                placeholder="e.g. JOHN-A1B2"
-                data-testid="job-referral"
-              />
-              {refStatus?.valid && (
-                <div className="text-[#16A34A] text-sm mt-1">✓ Referral by {refStatus.marketer_name}</div>
-              )}
-              {refStatus?.valid === false && form.referral_code && (
-                <div className="text-red-600 text-sm mt-1">Invalid code</div>
-              )}
             </div>
             <button type="submit" className="btn-brutal dark" disabled={busy} data-testid="job-submit-btn">
               {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</> : "Send request"}

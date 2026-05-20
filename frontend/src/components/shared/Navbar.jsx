@@ -19,23 +19,19 @@ export default function Navbar() {
           </div>
           <div>
             <div className="font-display text-xl tracking-tighter leading-none">NOSKO</div>
-            <div className="overline text-[10px] text-neutral-500">HANDYMAN CO. · DFW</div>
+            <div className="overline text-[10px] text-neutral-500">HANDYMAN · DFW</div>
           </div>
         </Link>
         <nav className="hidden md:flex items-center gap-7 overline text-neutral-700">
-          <Link to="/#services" data-testid="nav-services-link">Services</Link>
-          <Link to="/request" data-testid="nav-request-link">Request Quote</Link>
-          <Link to="/join/worker" data-testid="nav-worker-link">Become Handyman</Link>
-          <Link to="/join/marketer" data-testid="nav-marketer-link">Marketer</Link>
+          <a href="/#services" data-testid="nav-services-link">Services</a>
+          <a href="/#how" data-testid="nav-how-link">How it works</a>
+          <Link to="/request" data-testid="nav-request-link">Get a quote</Link>
         </nav>
         <div className="flex items-center gap-3">
           {user ? (
             <>
               <Link
-                to={user.role === "admin" || user.role === "developer" ? "/admin"
-                  : user.role === "worker" ? "/dashboard/worker"
-                  : user.role === "marketer" ? "/dashboard/marketer"
-                  : "/account"}
+                to={user.role === "admin" || user.role === "developer" ? "/admin" : "/account"}
                 className="btn-brutal ghost"
                 data-testid="nav-dashboard-btn"
               >
@@ -46,10 +42,7 @@ export default function Navbar() {
               </button>
             </>
           ) : (
-            <>
-              <Link to="/login" className="overline text-neutral-700 hidden sm:inline" data-testid="nav-login-link">Sign in</Link>
-              <Link to="/register" className="btn-brutal" data-testid="nav-register-btn">Get started</Link>
-            </>
+            <Link to="/request" className="btn-brutal" data-testid="nav-cta-btn">Get a quote</Link>
           )}
         </div>
       </div>

@@ -3,10 +3,9 @@ import { useAuth, formatApiError } from "@/lib/auth";
 import { api } from "@/lib/api";
 import Navbar from "@/components/shared/Navbar";
 import Footer from "@/components/shared/Footer";
-import { Loader2, ShieldCheck, Briefcase, BadgeDollarSign } from "lucide-react";
+import { Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import StripeConnectCard from "@/components/shared/StripeConnectCard";
 
 export default function AccountSettings() {
   const { user, refresh } = useAuth();
@@ -72,19 +71,14 @@ export default function AccountSettings() {
           <div className="p-5 bg-[#FFD600]">
             <div className="overline">Quick links</div>
             <div className="flex flex-wrap gap-2 mt-2">
-              {user.role === "worker" && <Link to="/dashboard/worker" className="overline border border-black px-2 py-1"><Briefcase className="w-3 h-3 inline mr-1" />Jobs</Link>}
-              {user.role === "marketer" && <Link to="/dashboard/marketer" className="overline border border-black px-2 py-1"><BadgeDollarSign className="w-3 h-3 inline mr-1" />Earnings</Link>}
-              {(user.role === "admin" || user.role === "developer") && <Link to="/admin" className="overline border border-black px-2 py-1"><ShieldCheck className="w-3 h-3 inline mr-1" />Admin</Link>}
-              {user.role === "customer" && <Link to="/join/worker" className="overline border border-black px-2 py-1">Apply as worker</Link>}
+              {(user.role === "admin" || user.role === "developer") && <Link to="/admin" className="overline border border-black px-2 py-1" data-testid="account-admin-link"><ShieldCheck className="w-3 h-3 inline mr-1" />Admin</Link>}
+              <Link to="/request" className="overline border border-black px-2 py-1" data-testid="account-quote-link">Get a quote</Link>
             </div>
           </div>
         </div>
 
-        {(user.role === "worker" || user.role === "marketer") && (
-          <div className="mt-10"><StripeConnectCard /></div>
-        )}
-
-        <div className="grid lg:grid-cols-2 gap-8 mt-10">          <form onSubmit={saveProfile} className="border-2 border-black p-6 grid gap-3" data-testid="account-profile-form">
+        <div className="grid lg:grid-cols-2 gap-8 mt-10">
+          <form onSubmit={saveProfile} className="border-2 border-black p-6 grid gap-3" data-testid="account-profile-form">
             <div className="overline">Profile</div>
             <div>
               <label className="overline">Name</label>
@@ -100,7 +94,7 @@ export default function AccountSettings() {
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" className="!w-auto" checked={form.notify_email} onChange={(e) => setForm({ ...form, notify_email: e.target.checked })} data-testid="account-notify" />
-              Email me job & earnings updates
+              Email me updates
             </label>
             <button className="btn-brutal dark mt-2" disabled={busy} data-testid="account-save-btn">Save profile</button>
           </form>

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { api, fileUrl } from "@/lib/api";
 import Navbar from "@/components/shared/Navbar";
 import Footer from "@/components/shared/Footer";
-import { ArrowRight, Zap, Wrench, ShieldCheck, BadgeDollarSign, MapPin, CheckCircle2, Star } from "lucide-react";
+import { ArrowRight, Zap, Wrench, ShieldCheck, MapPin, CheckCircle2 } from "lucide-react";
 
 const WORKER_IMG = "https://images.unsplash.com/photo-1772338537689-056082f100a9?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwxfHxoYW5keW1hbiUyMHJlcGFpcmluZyUyMG91dGxldHxlbnwwfHx8fDE3NzkyMjQ1Njl8MA&ixlib=rb-4.1.0&q=85";
 const TOOLS_IMG = "https://images.unsplash.com/photo-1584677191047-38f48d0db64e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwyfHxoYW5keW1hbiUyMHRvb2wlMjBib3h8ZW58MHx8fHwxNzc5MjI0NTgxfDA&ixlib=rb-4.1.0&q=85";
@@ -20,9 +20,23 @@ export default function LandingPage() {
     api.get("/portfolio").then((r) => setPortfolio(r.data || [])).catch(() => {});
   }, []);
 
-  if (!s) return (
-    <div className="min-h-screen flex items-center justify-center"><div className="overline">Loading…</div></div>
-  );
+  if (!s) {
+    // Render with defaults so the page never hangs on a slow/failed settings call
+    return (
+      <div className="bg-white">
+        <Navbar />
+        <section className="border-b border-black/10">
+          <div className="max-w-[1280px] mx-auto px-6 lg:px-10 py-20 lg:py-28">
+            <div className="overline text-neutral-500">Loading content…</div>
+            <h1 className="font-display text-5xl md:text-6xl tracking-tighter mt-3">Nosko Handyman</h1>
+            <p className="mt-3 text-neutral-600">DFW Metroplex · Get a free quote in 24 hrs.</p>
+            <Link to="/request" className="btn-brutal mt-6 inline-flex" data-testid="hero-request-btn">Get a free quote <ArrowRight className="w-4 h-4" /></Link>
+          </div>
+        </section>
+        <Footer />
+      </div>
+    );
+  }
 
   const minCharge = s.minimum_charge ?? 50;
   const outletPrice = s.outlet_price ?? 25;
@@ -108,7 +122,7 @@ export default function LandingPage() {
       </section>
 
       {/* HOW IT WORKS */}
-      <section className="max-w-[1280px] mx-auto px-6 lg:px-10 py-20">
+      <section id="how" className="max-w-[1280px] mx-auto px-6 lg:px-10 py-20">
         <div className="overline text-neutral-500">{s.how_overline}</div>
         <h2 className="font-display text-4xl md:text-5xl tracking-tighter mt-2" data-testid="how-heading">{s.how_heading}</h2>
         <div className="grid md:grid-cols-3 gap-6 mt-10">
@@ -150,40 +164,6 @@ export default function LandingPage() {
                 <div className="absolute bottom-0 left-0 right-0 bg-black/70 p-2 overline text-xs text-[#FFD600]">{p.title}</div>
               </div>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* PROGRAMS */}
-      <section id="programs" className="max-w-[1280px] mx-auto px-6 lg:px-10 py-20">
-        <div className="overline text-neutral-500">{s.programs_overline}</div>
-        <h2 className="font-display text-4xl md:text-5xl tracking-tighter mt-2" data-testid="programs-heading">{s.programs_heading}</h2>
-        <div className="grid md:grid-cols-2 gap-6 mt-10">
-          <div className="border-2 border-black p-8 bg-white">
-            <Wrench className="w-9 h-9" />
-            <h3 className="font-display text-3xl mt-4 tracking-tight">{s.worker_program_title}</h3>
-            <p className="text-neutral-700 mt-3 text-sm">{s.worker_program_body}</p>
-            <ul className="mt-4 space-y-1 text-sm">
-              <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#16A34A]" /> Flexible hours</li>
-              <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#16A34A]" /> W9 / 1099 compliant</li>
-              <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#16A34A]" /> Weekly payouts</li>
-            </ul>
-            <Link to="/join/worker" className="btn-brutal dark mt-6 inline-flex" data-testid="program-worker-btn">
-              {s.worker_program_cta} <ArrowRight className="w-4 h-4" />
-            </Link>
-          </div>
-          <div className="border-2 border-black p-8 bg-[#FFD600]">
-            <BadgeDollarSign className="w-9 h-9" />
-            <h3 className="font-display text-3xl mt-4 tracking-tight">{s.marketer_program_title}</h3>
-            <p className="mt-3 text-sm">{s.marketer_program_body}</p>
-            <ul className="mt-4 space-y-1 text-sm">
-              <li className="flex items-center gap-2"><Star className="w-4 h-4" /> Personal code</li>
-              <li className="flex items-center gap-2"><Star className="w-4 h-4" /> 15% on every booking</li>
-              <li className="flex items-center gap-2"><Star className="w-4 h-4" /> Live earnings dashboard</li>
-            </ul>
-            <Link to="/join/marketer" className="btn-brutal mt-6 inline-flex" data-testid="program-marketer-btn">
-              {s.marketer_program_cta} <ArrowRight className="w-4 h-4" />
-            </Link>
           </div>
         </div>
       </section>

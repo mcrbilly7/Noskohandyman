@@ -1,42 +1,46 @@
-# Nosko Handyman — PRD (Iter 4)
+# Nosko Handyman — PRD (Iter 5)
 
-## Iter 4 additions
-- ✅ **Public tracking page** `GET /api/jobs/track/{job_id}` + `/track/:jobId` React route. No login. Safe subset only (name, service, address, status, ETA message, quoted amount, assigned handyman name, photos). Track link included in the customer confirmation email and shown on the success screen.
-- ✅ **Auto-payouts on completion** — when admin sets job status to `completed`:
-  - 15% to marketer (if referral_code valid)
-  - 50% to assigned worker
-  - remainder (35% or 50%) recorded as platform payout to the first founding admin (`noskotx@gmail.com`)
-  - Recipients with `stripe_payouts_enabled=true` get a real `stripe.Transfer`; others recorded as `method='manual'`
-  - **Race-safe**: atomic `findOneAndUpdate` ensures double-clicks don't fire duplicate payouts
-  - Admin can pass `auto_payout=false` to skip
-- ✅ 81/81 backend tests pass (15 new iter3 tests added on top of the iter1+iter2 regression suite).
+## Iter 5 — Solo handyman pivot
+- Removed worker/marketer signup flows and links from public site (kept backend collections/endpoints dormant).
+- Simplified nav: Services / How it works / Get a quote. Single CTA: "Get a quote".
+- Admin tabs reduced to: **Quote requests · Team · Portfolio · Edit website**.
+- "Edit website" expanded into a full site editor: brand & contact (incl. website_domain), hero copy + CTAs, services tiles (add/remove/edit each), how-it-works steps (add/remove/edit), programs copy (kept on backend for future), final CTA, footer tagline.
+- Landing page is now 100% driven by site_settings — no hardcoded copy.
+- Job request page no longer asks for referral code.
+- AccountSettings cleaned up (removed Stripe Connect card since no workers/marketers).
+- LandingPage now renders with safe defaults if /api/site/settings is slow/fails — **no more infinite loading**.
+- Added 20s axios timeout so calls fail fast instead of hanging.
+- All 81 backend regression tests still pass.
 
-## ⚠️ Owner action still required
-1. **Enable Stripe Connect** at https://dashboard.stripe.com/connect (30s, free, one-time).
-   - Until then, auto-payouts are recorded but not actually transferred to bank accounts.
-2. **Real Gmail emails are working** — App Password `onglpbnyxgkwgvnb` confirmed sending welcome / quote / reset emails from `noskotx@gmail.com`.
+## Production deployment
+- Custom domain (preview & prod):
+  - PREVIEW: https://nosko-handyman.preview.emergentagent.com
+  - PRODUCTION: https://noskotx.com (deployed via Emergent platform)
+- Production frontend env (REACT_APP_BACKEND_URL) must point to the deployed production backend, not the preview URL.
+- Production backend env must include SMTP_*, STRIPE_API_KEY, FOUNDING_ADMINS, EMERGENT_LLM_KEY copied from preview.
 
-## Cumulative feature set
-- Cleaner DFW marketing site with portfolio + services grid + $25/swap + $50 visit minimum
-- Anonymous quote request flow with photo upload + referral codes
-- **Public job tracking page** (new)
-- Worker / marketer signup wizards (profile → W9 → done)
-- W9 (typed signature + PDF upload), stored in `w9_records`
-- Worker dashboard: earnings cards (weekly/monthly/yearly/all-time), 12-week chart, assigned jobs table, payouts list, Stripe Connect card
-- Marketer dashboard: referral code + copyable share URL, earnings + chart, Stripe Connect card
-- Admin dashboard: stats, Jobs (assign worker, change status, see photos & quote), Workers/Marketers (pay), **Team** tab (founder-only role management), Portfolio CRUD, Site Settings editor (hero copy, contact, area, $ amounts)
-- Hybrid auth: Google OAuth + email/password register/login/forgot/reset
-- Account settings page for all users
-- Gmail SMTP transactional emails: welcome, new-job to company, customer confirmation w/ track link, password reset
-- Stripe Connect Express onboarding + transfers (waiting for owner to enable Connect)
-- **Auto-payouts on job completion** (new) with 15/50/rest split
+## Cumulative feature set (current)
+- Public landing page (Hero / Services / How it works / Portfolio / Final CTA / Footer) - 100% editable from admin
+- Anonymous quote request flow with photo upload
+- Public job tracking page at `/track/:jobId`
+- Hybrid auth: Google OAuth + email/password + forgot/reset password
+- Founding admins auto-promoted: noskotx@gmail.com, nossonkosowsky32@gmail.com
+- Admin "Team" tab (founder-only role management)
+- Account settings (every user)
+- Full site editor (admin "Edit website" tab)
+- Real Gmail SMTP transactional emails: welcome / quote-request to company / customer confirmation w/ track link / password reset
+- Auto-payouts on job completion (dormant — no workers/marketers signing up via UI now; still callable via API if needed)
+- Stripe Connect endpoints intact (dormant)
 
 ## Backlog (P0 → P2)
-- **P0 (owner)**: Enable Stripe Connect at https://dashboard.stripe.com/connect.
-- **P1**: `POST /api/stripe/webhook` to listen for `account.updated`, `transfer.failed`, `transfer.reversed` and reconcile payouts collection.
-- **P1**: Offload SMTP to FastAPI BackgroundTasks (currently adds ~3s latency to POST /jobs).
-- **P1**: Pydantic models on POST endpoints (raw dict → 500 on missing keys).
-- **P2**: Split server.py into modules (1110+ lines).
-- **P2**: TTL index on `user_sessions.expires_at`.
-- **P2**: Customer "track my job" magic link with optional email-on-status-change notifications.
-- **P2**: SMS notifications via Twilio (DFW homeowners are texters).
+- **P1**: Pydantic models on POST endpoints (raw dict → 500 on missing fields).
+- **P1**: Move SMTP to FastAPI BackgroundTasks (currently adds ~3s latency to POST /jobs).
+- **P2**: Customer SMS notifications via Twilio.
+- **P2**: TTL index on user_sessions.expires_at.
+- **P2**: Split server.py into modules.
+- **P2 (optional)**: Remove dormant worker/marketer/payout backend endpoints if owner confirms permanent solo-handyman model.
+
+## Notes for future sessions
+- The admin "Edit website" tab is the source of truth for landing page copy. Owner can edit everything from there.
+- All admin tabs work as designed; founder edits visible only to noskotx@gmail.com and nossonkosowsky32@gmail.com.
+- If owner wants worker/marketer back, just restore the routes in `/app/frontend/src/App.js` and re-link from nav/landing.
