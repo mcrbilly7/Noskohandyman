@@ -1,46 +1,42 @@
-# Nosko Handyman — PRD (Iter 6)
+# Nosko Handyman — PRD (Iter 7)
 
-## Iter 6 changes
-- **Removed $25 set-price entirely** from defaults: `outlet_price` default is now `0` (= hidden on landing & request pages). Visit minimum stays at $50.
-- **Landing**: single bold "$50 Visit minimum" card replaces the two-card layout. Updated subtitle, "Anything a handyman does — we do." section heading, services tile copy (no more "$25 flat").
-- **Calendar / time-slot picker on quote request**:
-  - Customer picks a date (no past dates) + time window (Morning / Afternoon / Evening / Flexible).
-  - Backend stores `preferred_date` (ISO date string) + `preferred_time_slot` on the job.
-  - Public tracking page shows scheduled time.
-  - Admin job row displays preferred time as a black/yellow chip.
-- **Sparse settings doc**: `GET /api/site/settings` now merges stored values over `SiteSettings()` defaults — so admin edits can be sparse and missing fields fall back gracefully (fixes the "blank hero / blank CTA" bug).
-- All 81/81 backend tests pass.
+## Iter 7 changes
+- **CORS hardened** for cross-origin credentialed requests. The old config used `allow_origins=["*"]` with `allow_credentials=True` — browsers reject that combo for any origin that wasn't already cached. Now uses `allow_origin_regex=".*"` so the server echoes back the request origin (works for noskotx.com from any device).
+- **Owner availability schedule**:
+  - `GET /api/availability` (public) — returns `{blocked_dates: [YYYY-MM-DD]}`.
+  - `PUT /api/availability` (admin) — replaces full set.
+  - Admin Dashboard new **Schedule** tab with 2-month calendar; click any future day to toggle blocked (red-strike). Blocked count + clear-all sidebar.
+  - Customer quote calendar (on `/request`) loads blocked dates and disables them (unclickable).
+  - `POST /api/jobs` server-side guard: rejects with 400 if `preferred_date` is in blocked list (defense in depth).
+- **Service tile cover images**:
+  - Each `services[]` entry on site_settings supports `image_path`.
+  - Admin "Edit website" → Services tiles: per-tile FileUploader for cover image (140px slot).
+  - Landing page renders 4:3 cover image at top of each service tile when set.
+- **Admin sidebar cleaned**: removed Workers/Marketers/Jobs/Portfolio links (those are tabs inside Command center now). Sidebar shows: Command center · My account.
 
-## Editable from admin "Edit website" tab
-- Hero title/subtitle + CTA labels
-- Visit minimum $ and outlet/swap $ (set outlet=0 to hide that card)
-- Services tiles (add/edit/remove)
-- How-it-works steps (add/edit/remove)
-- Section headings & overlines
-- Programs copy (dormant on landing, kept for future)
-- Final CTA strip + footer tagline
-- Website domain, contact phone & email, service area
+## Test status
+- **95/95 backend tests pass** (81 prior + 14 new iter7). See `/app/test_reports/`.
+- Lint warnings about pre-existing apostrophe-escapes/old hooks are not regressions; new file `AvailabilityEditor.jsx` is clean.
 
-## Cumulative feature set (current)
-- Cleaner DFW marketing site: Hero / Services / How / Portfolio / Final CTA / Footer — all editable
-- **Anonymous quote request** with photo upload + **calendar & time-slot picker**
-- **Public job tracking page** `/track/:jobId` showing status, ETA, scheduled time, address, quote
-- Hybrid auth: Google OAuth + email/password + forgot/reset password
-- Founding admins (`noskotx@gmail.com`, `nossonkosowsky32@gmail.com`) auto-promoted; founder-only role management in admin "Team" tab
-- Account settings page for every user
-- Admin: Quote requests / Team / Portfolio / Edit website
-- Gmail SMTP transactional emails (welcome, quote-request to owner, customer confirmation w/ track link, password reset)
-- Stripe Connect + auto-payouts logic remain in backend (dormant)
+## Cumulative current feature set
+- Editable solo-handyman marketing site (Hero / Services with covers / How / Portfolio / Final CTA / Footer)
+- Anonymous quote request with photo upload + calendar (blocked days disabled) + time-slot picker
+- Public job tracking page `/track/:jobId`
+- Hybrid auth (Google OAuth + email/password + forgot/reset)
+- Founding admins: noskotx@gmail.com, nossonkosowsky32@gmail.com
+- Admin tabs: Quote requests · **Schedule** · Team · Portfolio · Edit website
+- Per-user account settings (name / phone / location / notify_email / password)
+- Real Gmail SMTP emails (welcome, quote, reset, track link)
+- Stripe Connect + auto-payouts logic dormant in backend
 
-## Action items for owner (production)
-- **Redeploy** to push iter5 + iter6 changes to https://noskotx.com.
-- Enable Stripe Connect at https://dashboard.stripe.com/connect (if/when re-introducing payouts).
-- DNS / custom domain steps in the previous summary.
+## Owner action for production
+1. **Redeploy** to push iter7 (CORS fix + availability + service covers + sidebar cleanup) to https://noskotx.com. The CORS fix is the critical one for "doesn't work on other devices".
+2. After redeploy, ask a friend to test on a fresh device — submitting a quote should work without sign-in.
+3. If still broken after redeploy: contact Emergent Support — production ingress may need its own CORS allow.
 
 ## Backlog
-- **P1**: Pydantic models on POST endpoints (raw dict → 500 on missing fields).
-- **P1**: Move SMTP to FastAPI BackgroundTasks (sync sends add ~3s latency).
-- **P2**: SMS notifications via Twilio (DFW homeowners are texters).
-- **P2**: Customer-facing "edit my scheduled time" link in confirmation email.
-- **P2**: Admin can override preferred time + auto-send "scheduled for X" email.
-- **P2**: Remove dormant worker/marketer/payout backend endpoints if owner confirms permanent solo-handyman model.
+- P1: Move SMTP to BackgroundTasks
+- P1: Pydantic request models on POST endpoints
+- P2: SMS via Twilio
+- P2: Calendar export (ICS) of upcoming jobs for the owner
+- P2: Customer-facing "edit my scheduled time" via track page

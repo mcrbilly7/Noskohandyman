@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { Zap, LogOut, LayoutDashboard, ShieldCheck, Users, Briefcase, Image as ImageIcon, Settings, BadgeDollarSign, Wrench } from "lucide-react";
+import { Zap, LogOut, LayoutDashboard, Settings } from "lucide-react";
 
 export default function DashboardLayout({ children, role = "worker" }) {
   const { user, logout } = useAuth();
@@ -10,19 +10,8 @@ export default function DashboardLayout({ children, role = "worker" }) {
 
   const links = {
     admin: [
-      { to: "/admin", label: "Overview", icon: LayoutDashboard },
-      { to: "/admin/jobs", label: "Jobs", icon: Briefcase },
-      { to: "/admin/workers", label: "Workers", icon: Wrench },
-      { to: "/admin/marketers", label: "Marketers", icon: BadgeDollarSign },
-      { to: "/admin/portfolio", label: "Portfolio", icon: ImageIcon },
-      { to: "/admin/settings", label: "Site settings", icon: Settings },
-    ],
-    worker: [
-      { to: "/dashboard/worker", label: "Earnings", icon: BadgeDollarSign },
-      { to: "/dashboard/worker/jobs", label: "My jobs", icon: Briefcase },
-    ],
-    marketer: [
-      { to: "/dashboard/marketer", label: "Earnings", icon: BadgeDollarSign },
+      { to: "/admin", label: "Command center", icon: LayoutDashboard },
+      { to: "/account", label: "My account", icon: Settings },
     ],
   }[role] || [];
 

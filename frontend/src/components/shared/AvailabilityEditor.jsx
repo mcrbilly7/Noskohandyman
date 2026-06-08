@@ -81,7 +81,7 @@ export default function AvailabilityEditor() {
         <div className="p-5 bg-[#F9FAFB]">
           <div className="overline">Blocked days ({blocked.length})</div>
           {blocked.length === 0 ? (
-            <p className="text-sm text-neutral-500 mt-2">You're open every day. Click any future day on the calendar to block it.</p>
+            <p className="text-sm text-neutral-500 mt-2">You&apos;re open every day. Click any future day on the calendar to block it.</p>
           ) : (
             <ul className="mt-3 grid gap-1 max-h-96 overflow-auto">
               {blocked.map((d) => (
@@ -99,4 +99,6 @@ export default function AvailabilityEditor() {
       </div>
     </div>
   );
+}
+);
 }
