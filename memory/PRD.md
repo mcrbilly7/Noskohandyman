@@ -3,7 +3,7 @@
 ## Product overview
 Solo-handyman web app for Nosko (DFW). Customers submit quote requests with photos + preferred schedule. **Admin sets the price manually** and clicks **Send Quote** to email the customer (with editable subject + HTML). Customers track their job at `/track/:jobId` without logging in.
 
-## Iter 8 changes (June 12, 2026) — Manual quoting
+## Iter 8 changes (June 12, 2026) — Manual quoting + mobile admin + de-branding
 - **Removed auto-pricing**: `POST /api/jobs` now creates jobs with `quoted_amount = null` and `quote_status = "pending"`. No more $50 floor stamped at creation.
 - **3 new admin endpoints**:
   - `PUT /api/jobs/{job_id}/quote` — saves price, sets `quote_status = "draft"` (visible to admin only, NOT exposed publicly).
@@ -16,6 +16,13 @@ Solo-handyman web app for Nosko (DFW). Customers submit quote requests with phot
   - "Send quote" button → opens modal with editable Subject + HTML editor + Preview tab + plain-text fallback. Confirm → emails customer + flips status to SENT (green badge with date).
 - **TrackJobPage**: shows "Pending quote" until `quote_status === "sent"`.
 - **Confirmation email rewrite**: post-submission email now says "we'll email you a custom quote within 24 hours" instead of pretending the request is already priced.
+- **Mobile-friendly admin dashboard**: sidebar collapses behind a hamburger drawer below `lg` (1024px). New sticky topbar with MENU button + NOSKO logo + role tag. Stats grid reflows to 2×2 on mobile, tabs are horizontally scrollable, team table scrolls inside an overflow container, availability calendar drops to 1 month on phones, and admin page padding shrinks from `p-8` → `p-4`.
+- **De-Emergent branded**:
+  - Browser tab title is now "Nosko Handyman — DFW" (was "Emergent | Fullstack App").
+  - Removed the bottom-right **"Made with Emergent"** badge and its loader script (`assets.emergent.sh/scripts/emergent-main.js`).
+  - Removed embedded PostHog telemetry that was tied to the badge.
+  - Updated meta description to Nosko's positioning.
+  - Kept the Emergent OAuth flow in `lib/auth.jsx` (the invisible mechanism behind "Sign in with Google" — removing it would break login).
 
 ## Test status
 - 16/16 backend pytest pass (`backend/tests/test_quote_flow.py`) — covers create/track/save/preview/send + auth-required negatives + 404s + validation.

@@ -43,30 +43,30 @@ export default function AdminDashboard() {
 
   return (
     <DashboardLayout role="admin">
-      <div className="p-8 max-w-[1400px]">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
         <div className="overline">Admin</div>
-        <h1 className="font-display text-4xl tracking-tighter mt-1" data-testid="admin-title">Command center</h1>
+        <h1 className="font-display text-3xl sm:text-4xl tracking-tighter mt-1" data-testid="admin-title">Command center</h1>
 
-        <div className="grid md:grid-cols-4 gap-0 border border-black mt-6" data-testid="admin-stats">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-0 border border-black mt-6" data-testid="admin-stats">
           {[
             { l: "New jobs", v: stats.jobs_new || 0, hl: true },
             { l: "Total jobs", v: stats.jobs_total || 0 },
             { l: "Completed", v: stats.jobs_completed || 0 },
             { l: "All users", v: stats.users_total || 0 },
           ].map((c) => (
-            <div key={c.l} className={`p-5 border-r border-black last:border-r-0 ${c.hl ? "bg-[#FFD600]" : "bg-white"}`}>
+            <div key={c.l} className={`p-4 sm:p-5 border-r border-b lg:border-b-0 border-black last:border-r-0 even:border-r-0 lg:even:border-r ${c.hl ? "bg-[#FFD600]" : "bg-white"}`}>
               <div className="overline">{c.l}</div>
-              <div className="font-display text-3xl tracking-tighter mt-1">{c.v}</div>
+              <div className="font-display text-2xl sm:text-3xl tracking-tighter mt-1">{c.v}</div>
             </div>
           ))}
         </div>
 
         <Tabs defaultValue="jobs" className="mt-8">
-          <TabsList className="bg-black text-white rounded-none border-2 border-black p-0 h-auto flex flex-wrap">
+          <TabsList className="bg-black text-white rounded-none border-2 border-black p-0 h-auto flex flex-nowrap overflow-x-auto w-full justify-start scrollbar-thin">
             {[
               ["jobs", "Quote requests"], ["schedule", "Schedule"], ["team", "Team"], ["portfolio", "Portfolio"], ["settings", "Edit website"],
             ].map(([v, l]) => (
-              <TabsTrigger key={v} value={v} className="rounded-none data-[state=active]:bg-[#FFD600] data-[state=active]:text-black overline px-4 py-2" data-testid={`tab-${v}`}>{l}</TabsTrigger>
+              <TabsTrigger key={v} value={v} className="rounded-none data-[state=active]:bg-[#FFD600] data-[state=active]:text-black overline px-3 sm:px-4 py-2 shrink-0 text-[10px] sm:text-xs" data-testid={`tab-${v}`}>{l}</TabsTrigger>
             ))}
           </TabsList>
 
@@ -90,14 +90,15 @@ export default function AdminDashboard() {
           </TabsContent>
 
           <TabsContent value="team" className="mt-4">
-            <div className="border-2 border-black bg-white" data-testid="admin-team-section">              <div className="p-4 border-b border-black bg-[#F9FAFB] flex items-center justify-between">
+            <div className="border-2 border-black bg-white" data-testid="admin-team-section">              <div className="p-4 border-b border-black bg-[#F9FAFB] flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <div className="overline">All users · {users.length}</div>
                   <div className="text-sm text-neutral-700">Founders can change anyone&apos;s role. Admins &amp; developers see this list read-only.</div>
                 </div>
                 {!isFounder && <span className="overline text-[10px] inline-flex items-center gap-1 bg-yellow-100 border border-black px-2 py-1"><ShieldAlert className="w-3 h-3" /> Founder-only edits</span>}
               </div>
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
                 <thead className="bg-[#F9FAFB] overline text-[10px]">
                   <tr><th className="p-3 text-left">User</th><th className="p-3 text-left">Auth</th><th className="p-3 text-left">Role</th><th className="p-3 text-left">Joined</th><th className="p-3 text-right">{isFounder ? "Set role" : ""}</th></tr>
                 </thead>
@@ -130,6 +131,7 @@ export default function AdminDashboard() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           </TabsContent>
 

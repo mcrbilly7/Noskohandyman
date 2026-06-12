@@ -24,11 +24,22 @@ const fmt = (d) => {
   return `${y}-${m}-${day}`;
 };
 
+function useIsNarrow(bp = 768) {
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < bp);
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth < bp);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [bp]);
+  return narrow;
+}
+
 export default function AvailabilityEditor() {
   const [blocked, setBlocked] = useState([]);
   const [weekdays, setWeekdays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const isNarrow = useIsNarrow();
 
   useEffect(() => {
     api.get("/availability").then((r) => {
@@ -114,7 +125,7 @@ export default function AvailabilityEditor() {
               modifiers={{ blocked: blockedDateObjs, weeklyOff: (d) => weekdays.includes(JS_DOW_TO_LABEL[d.getDay()]) }}
               modifiersClassNames={{ blocked: "bg-red-200 line-through", weeklyOff: "bg-red-50 text-neutral-400" }}
               disabled={(d) => d < today}
-              numberOfMonths={2}
+              numberOfMonths={isNarrow ? 1 : 2}
               data-testid="availability-calendar"
             />
             <p className="text-xs text-neutral-500 mt-3">

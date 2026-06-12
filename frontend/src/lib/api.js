@@ -6,7 +6,14 @@ export const API = `${BACKEND_URL}/api`;
 export const api = axios.create({
   baseURL: API,
   withCredentials: true,
-  timeout: 20000,
+  timeout: 30000,
+});
+
+// Uploads can be large (phone photos) and storage may be slow — give them their own timeout.
+export const uploadApi = axios.create({
+  baseURL: API,
+  withCredentials: true,
+  timeout: 120000,
 });
 
 api.interceptors.request.use((config) => {
