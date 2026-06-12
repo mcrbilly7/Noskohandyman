@@ -5,10 +5,13 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import FileUploader from "@/components/shared/FileUploader";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Image as ImageIcon, Trash2, ShieldAlert, Send, Loader2, Check } from "lucide-react";
+import { Image as ImageIcon, Trash2, ShieldAlert, Send, Loader2, Check, Tag, Mail, FileText, Plus, X as IconX, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import AvailabilityEditor from "@/components/shared/AvailabilityEditor";
 import MyWeekView from "@/components/shared/MyWeekView";
+import EmailListTab from "@/components/admin/EmailListTab";
+import DiscountCodesTab from "@/components/admin/DiscountCodesTab";
+import EmailTemplatesTab from "@/components/admin/EmailTemplatesTab";
 
 const FOUNDING_EMAILS = ["noskotx@gmail.com", "nossonkosowsky32@gmail.com"];
 
@@ -64,7 +67,7 @@ export default function AdminDashboard() {
         <Tabs defaultValue="jobs" className="mt-8">
           <TabsList className="bg-black text-white rounded-none border-2 border-black p-0 h-auto flex flex-nowrap overflow-x-auto w-full justify-start scrollbar-thin">
             {[
-              ["jobs", "Quote requests"], ["schedule", "Schedule"], ["team", "Team"], ["portfolio", "Portfolio"], ["settings", "Edit website"],
+              ["jobs", "Quote requests"], ["schedule", "Schedule"], ["emails", "Email list"], ["codes", "Discount codes"], ["templates", "Email templates"], ["team", "Team"], ["portfolio", "Portfolio"], ["settings", "Edit website"],
             ].map(([v, l]) => (
               <TabsTrigger key={v} value={v} className="rounded-none data-[state=active]:bg-[#FFD600] data-[state=active]:text-black overline px-3 sm:px-4 py-2 shrink-0 text-[10px] sm:text-xs" data-testid={`tab-${v}`}>{l}</TabsTrigger>
             ))}
@@ -87,6 +90,18 @@ export default function AdminDashboard() {
 
           <TabsContent value="schedule" className="mt-4">
             <AvailabilityEditor />
+          </TabsContent>
+
+          <TabsContent value="emails" className="mt-4">
+            <EmailListTab />
+          </TabsContent>
+
+          <TabsContent value="codes" className="mt-4">
+            <DiscountCodesTab />
+          </TabsContent>
+
+          <TabsContent value="templates" className="mt-4">
+            <EmailTemplatesTab />
           </TabsContent>
 
           <TabsContent value="team" className="mt-4">
@@ -271,28 +286,58 @@ function SendQuoteDialog({ job, amount, open, onClose, onSent }) {
   const [html, setHtml] = useState("");
   const [text, setText] = useState("");
   const [mode, setMode] = useState("edit");  // edit | preview
+  const [templates, setTemplates] = useState([]);
+  const [templateId, setTemplateId] = useState(null);
+  const [lineItems, setLineItems] = useState([]);
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  const [dirty, setDirty] = useState(false);  // tracks manual subject/html edits
 
+  // Load templates once on open
   useEffect(() => {
     if (!open) return;
+    api.get("/email-templates").then((r) => {
+      const tpls = r.data || [];
+      setTemplates(tpls);
+      const def = tpls.find((t) => t.is_default) || tpls[0];
+      if (def) setTemplateId(def.template_id);
+    }).catch(() => {});
+  }, [open]);
+
+  // Regenerate preview whenever template / line items / amount change (but only if user hasn't manually edited)
+  useEffect(() => {
+    if (!open || !templateId) return;
     setLoading(true);
-    api.post(`/jobs/${job.job_id}/quote-preview`, { quoted_amount: amount, origin: window.location.origin })
-      .then((r) => {
+    api.post(`/jobs/${job.job_id}/quote-preview`, {
+      quoted_amount: amount,
+      origin: window.location.origin,
+      template_id: templateId,
+      line_items: lineItems,
+    }).then((r) => {
+      if (!dirty) {
         setSubject(r.data.subject || "");
         setHtml(r.data.html || "");
         setText(r.data.text || "");
-      })
-      .catch(() => toast.error("Could not load template"))
+      }
+    }).catch(() => toast.error("Could not load template"))
       .finally(() => setLoading(false));
-  }, [open, job.job_id, amount]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, templateId, lineItems, amount, job.job_id]);
+
+  const addItem = () => setLineItems([...lineItems, { label: "", amount: 0 }]);
+  const updItem = (i, k, v) => setLineItems(lineItems.map((li, idx) => idx === i ? { ...li, [k]: k === "amount" ? parseFloat(v) || 0 : v } : li));
+  const rmItem = (i) => setLineItems(lineItems.filter((_, idx) => idx !== i));
+  const breakdownTotal = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+
+  const resetFromTemplate = () => { setDirty(false); /* re-trigger effect by toggling */ setTemplateId((id) => id); };
 
   const send = async () => {
     setSending(true);
     try {
       await api.post(`/jobs/${job.job_id}/send-quote`, {
         quoted_amount: amount,
-        subject,
-        html,
-        text,
+        subject, html, text,
+        template_id: templateId,
+        line_items: lineItems,
         origin: window.location.origin,
       });
       toast.success(`Quote emailed to ${job.customer_email}`);
@@ -310,45 +355,83 @@ function SendQuoteDialog({ job, amount, open, onClose, onSent }) {
             Send quote — ${Number.isFinite(amount) ? amount.toFixed(2) : "—"}
           </DialogTitle>
           <p className="text-xs text-neutral-700">To: <b>{job.customer_email}</b> · Job {job.job_id}</p>
+          {job.promo_meta && (
+            <p className="text-xs mt-1 inline-flex items-center gap-1"><Tag className="w-3 h-3" /> Promo <b>{job.promo_meta.code}</b> · {job.promo_meta.percent_off}% off (auto-applied on send)</p>
+          )}
         </DialogHeader>
 
-        {loading ? (
+        {loading && !subject ? (
           <div className="p-10 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin" /></div>
         ) : (
           <div className="p-5 grid gap-4">
+            {/* Template picker */}
             <div>
-              <label className="overline">Subject</label>
-              <input
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                data-testid="quote-email-subject"
-                className="w-full"
-              />
+              <label className="overline">Template</label>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {templates.map((t) => (
+                  <button
+                    key={t.template_id}
+                    type="button"
+                    onClick={() => { setTemplateId(t.template_id); setDirty(false); }}
+                    className={`overline text-[11px] border-2 border-black px-3 py-1.5 ${templateId === t.template_id ? "bg-black text-[#FFD600]" : "bg-white hover:bg-neutral-50"}`}
+                    data-testid={`tpl-pick-${t.template_id}`}
+                  >
+                    {t.name}{t.is_default ? " ★" : ""}
+                  </button>
+                ))}
+                {dirty && (
+                  <button type="button" onClick={resetFromTemplate} className="overline text-[11px] underline">Reset edits</button>
+                )}
+              </div>
             </div>
 
+            {/* Line items / breakdown */}
+            <div className="border-2 border-dashed border-black p-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="overline inline-flex items-center gap-1">Quote breakdown (optional)</label>
+                <button type="button" onClick={() => setShowBreakdown(!showBreakdown)} className="overline text-[11px] underline" data-testid="toggle-breakdown">
+                  {showBreakdown ? "Hide" : "Add line items"}
+                </button>
+              </div>
+              {showBreakdown && (
+                <div className="mt-3 space-y-2" data-testid="breakdown-block">
+                  {lineItems.map((li, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <input value={li.label} onChange={(e) => updItem(i, "label", e.target.value)} placeholder="Labor / Materials / etc" className="flex-1" data-testid={`li-label-${i}`} />
+                      <span className="font-display">$</span>
+                      <input type="number" min="0" step="0.01" value={li.amount} onChange={(e) => updItem(i, "amount", e.target.value)} className="w-28 font-display" data-testid={`li-amount-${i}`} />
+                      <button type="button" onClick={() => rmItem(i)} className="p-1 border border-black"><IconX className="w-3 h-3" /></button>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center pt-2">
+                    <button type="button" onClick={addItem} className="overline text-[11px] inline-flex items-center gap-1 border-2 border-black px-3 py-1 bg-white" data-testid="add-line-item-btn">
+                      <Plus className="w-3 h-3" /> Add row
+                    </button>
+                    {lineItems.length > 0 && (
+                      <div className="text-sm">Subtotal of items: <b className="font-display text-lg">${breakdownTotal.toFixed(2)}</b></div>
+                    )}
+                  </div>
+                  {lineItems.length > 0 && Math.abs(breakdownTotal - amount) > 0.01 && (
+                    <p className="text-[11px] text-amber-700">Heads up: line-item subtotal (${breakdownTotal.toFixed(2)}) doesn't equal the quote total (${amount.toFixed(2)}). The customer sees the breakdown plus the bold TOTAL — make sure they reconcile.</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Subject */}
+            <div>
+              <label className="overline">Subject</label>
+              <input value={subject} onChange={(e) => { setSubject(e.target.value); setDirty(true); }} data-testid="quote-email-subject" className="w-full" />
+            </div>
+
+            {/* HTML edit / preview */}
             <div className="border-2 border-black">
               <div className="flex border-b-2 border-black">
-                <button
-                  type="button"
-                  onClick={() => setMode("edit")}
-                  className={`overline text-[11px] px-4 py-2 ${mode === "edit" ? "bg-black text-[#FFD600]" : "bg-white"}`}
-                  data-testid="quote-mode-edit"
-                >Edit HTML</button>
-                <button
-                  type="button"
-                  onClick={() => setMode("preview")}
-                  className={`overline text-[11px] px-4 py-2 ${mode === "preview" ? "bg-black text-[#FFD600]" : "bg-white"}`}
-                  data-testid="quote-mode-preview"
-                >Preview</button>
+                <button type="button" onClick={() => setMode("edit")} className={`overline text-[11px] px-4 py-2 ${mode === "edit" ? "bg-black text-[#FFD600]" : "bg-white"}`} data-testid="quote-mode-edit">Edit HTML</button>
+                <button type="button" onClick={() => setMode("preview")} className={`overline text-[11px] px-4 py-2 ${mode === "preview" ? "bg-black text-[#FFD600]" : "bg-white"}`} data-testid="quote-mode-preview">Preview</button>
               </div>
               {mode === "edit" ? (
-                <textarea
-                  value={html}
-                  onChange={(e) => setHtml(e.target.value)}
-                  rows={14}
-                  className="w-full font-mono text-xs p-3 border-0 rounded-none focus:ring-0"
-                  data-testid="quote-email-html"
-                />
+                <textarea value={html} onChange={(e) => { setHtml(e.target.value); setDirty(true); }} rows={14} className="w-full font-mono text-xs p-3 border-0 rounded-none focus:ring-0" data-testid="quote-email-html" />
               ) : (
                 <div className="p-4 bg-neutral-50 max-h-[400px] overflow-y-auto" data-testid="quote-email-preview" dangerouslySetInnerHTML={{ __html: html }} />
               )}
@@ -356,31 +439,14 @@ function SendQuoteDialog({ job, amount, open, onClose, onSent }) {
 
             <details className="text-xs">
               <summary className="overline cursor-pointer">Plain-text fallback (optional)</summary>
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                rows={4}
-                className="w-full mt-2 font-mono text-xs"
-                data-testid="quote-email-text"
-              />
+              <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className="w-full mt-2 font-mono text-xs" data-testid="quote-email-text" />
             </details>
           </div>
         )}
 
         <DialogFooter className="p-5 border-t-2 border-black bg-neutral-50 flex flex-row justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="overline text-[11px] border-2 border-black px-4 py-2 bg-white hover:bg-neutral-100"
-            data-testid="quote-cancel-btn"
-          >Cancel</button>
-          <button
-            type="button"
-            onClick={send}
-            disabled={sending || loading || !subject.trim()}
-            className="overline text-[11px] border-2 border-black px-4 py-2 bg-[#FFD600] hover:bg-yellow-300 disabled:opacity-40 inline-flex items-center gap-2"
-            data-testid="quote-send-confirm-btn"
-          >
+          <button type="button" onClick={onClose} className="overline text-[11px] border-2 border-black px-4 py-2 bg-white hover:bg-neutral-100" data-testid="quote-cancel-btn">Cancel</button>
+          <button type="button" onClick={send} disabled={sending || loading || !subject.trim()} className="overline text-[11px] border-2 border-black px-4 py-2 bg-[#FFD600] hover:bg-yellow-300 disabled:opacity-40 inline-flex items-center gap-2" data-testid="quote-send-confirm-btn">
             {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
             Send email
           </button>
@@ -479,6 +545,31 @@ function SiteSettingsEditor({ settings, onSave }) {
           <div><label className="overline">Contact email</label><input value={form.contact_email || ""} onChange={set("contact_email")} data-testid="settings-email" /></div>
           <div><label className="overline">Outlet/switch price ($)</label><input type="number" min="0" step="0.01" value={form.outlet_price ?? 25} onChange={setNum("outlet_price")} data-testid="settings-outlet" /></div>
           <div><label className="overline">Visit minimum ($)</label><input type="number" min="0" step="0.01" value={form.minimum_charge ?? 50} onChange={setNum("minimum_charge")} data-testid="settings-min" /></div>
+        </div>
+      </Section>
+
+      <Section title="Email signup & discount">
+        <div className="grid md:grid-cols-2 gap-4">
+          <div>
+            <label className="overline">Auto % off on signup</label>
+            <input
+              type="number" min="1" max="100"
+              value={form.signup_default_percent_off ?? 15}
+              onChange={(e) => setForm({ ...form, signup_default_percent_off: parseInt(e.target.value, 10) })}
+              data-testid="settings-signup-percent"
+            />
+            <p className="text-[11px] text-neutral-500 mt-1">Auto-applied to every code issued when someone signs up to the email list.</p>
+          </div>
+          <div>
+            <label className="overline">Show signup section on landing?</label>
+            <label className="flex items-center gap-2 mt-2">
+              <input type="checkbox" checked={form.newsletter_enabled ?? true} onChange={(e) => setForm({ ...form, newsletter_enabled: e.target.checked })} data-testid="settings-newsletter-enabled" />
+              <span>Yes — show the email signup section</span>
+            </label>
+          </div>
+          <div><label className="overline">Overline</label><input value={form.newsletter_overline || ""} onChange={set("newsletter_overline")} data-testid="settings-newsletter-overline" /></div>
+          <div><label className="overline">Heading</label><input value={form.newsletter_heading || ""} onChange={set("newsletter_heading")} data-testid="settings-newsletter-heading" /></div>
+          <div className="md:col-span-2"><label className="overline">Subheading</label><textarea rows={2} value={form.newsletter_subheading || ""} onChange={set("newsletter_subheading")} data-testid="settings-newsletter-sub" /></div>
         </div>
       </Section>
 

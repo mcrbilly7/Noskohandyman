@@ -254,6 +254,12 @@ class SiteSettings(BaseModel):
     minimum_charge: float = 50.0
     outlet_price: float = 0.0  # 0 = hidden on landing/request pages
     website_domain: str = "noskotx.com"
+    # Newsletter / discount
+    newsletter_enabled: bool = True
+    newsletter_overline: str = "Email list"
+    newsletter_heading: str = "Get 15% off your first job."
+    newsletter_subheading: str = "Drop your email — we'll send you a one-time discount code."
+    signup_default_percent_off: int = 15
 
     # Section headings
     services_overline: str = "What we fix"
@@ -756,6 +762,15 @@ async def create_job(payload: dict, request: Request):
         if wlabel and wlabel in blocked_weekdays:
             raise HTTPException(400, "We don't work on that day of the week. Please pick another day.")
     service_type = payload.get("service_type", "General Handyman")
+    # Validate promo code if present (but DO NOT mark used yet — only when quote is sent/accepted)
+    promo_code = (payload.get("promo_code") or "").strip().upper() or None
+    promo_meta = None
+    if promo_code:
+        dc = await db.discount_codes.find_one({"code": promo_code}, {"_id": 0})
+        if not dc or dc.get("used_at"):
+            promo_code = None
+        else:
+            promo_meta = {"code": dc["code"], "percent_off": dc["percent_off"], "code_id": dc["code_id"]}
     job = {
         "job_id": f"job_{uuid.uuid4().hex[:10]}",
         "customer_name": payload["customer_name"],
@@ -768,9 +783,13 @@ async def create_job(payload: dict, request: Request):
         "referral_code": referral_code,
         "preferred_date": payload.get("preferred_date"),
         "preferred_time_slot": payload.get("preferred_time_slot"),
+        "promo_code": promo_code,
+        "promo_meta": promo_meta,
         "quoted_amount": None,
         "quote_status": "pending",   # pending -> sent -> (accepted/declined later)
         "quote_sent_at": None,
+        "quote_line_items": [],
+        "quote_template_id": None,
         "status": "new",
         "assigned_worker_id": None,
         "created_at": now,
@@ -873,7 +892,10 @@ async def save_quote(job_id: str, payload: dict, _: dict = Depends(require_admin
 
 @api.post("/jobs/{job_id}/quote-preview")
 async def preview_quote_email(job_id: str, payload: dict, request: Request, _: dict = Depends(require_admin)):
-    """Return a pre-filled subject + HTML the admin can edit before sending."""
+    """Return a pre-filled subject + HTML the admin can edit before sending.
+
+    Body: { quoted_amount, template_id? (uses default if missing), line_items?: [{label, amount}] }
+    """
     try:
         amount = float(payload.get("quoted_amount"))
     except (TypeError, ValueError):
@@ -882,12 +904,31 @@ async def preview_quote_email(job_id: str, payload: dict, request: Request, _: d
     if not job:
         raise HTTPException(404, "Job not found")
     origin = payload.get("origin") or request.headers.get("origin") or str(request.base_url).rstrip("/")
+    line_items = payload.get("line_items") or []
+    # Pick template
+    tpl = None
+    template_id = payload.get("template_id")
+    if template_id:
+        tpl = await db.email_templates.find_one({"template_id": template_id}, {"_id": 0})
+    if not tpl:
+        tpl = await db.email_templates.find_one({"is_default": True}, {"_id": 0})
+    discount = job.get("promo_meta") or None
+    if tpl:
+        v = _template_vars_for_job(job, amount, origin, line_items, discount)
+        subject = _render_template(tpl["subject_template"], v)
+        html = _render_template(tpl["html_template"], v)
+        text = (
+            f"Hi {v['first_name']},\n\nYour Nosko quote for {v['service_type']} at {v['address']}: "
+            f"${v['amount']}\n\nView job: {v['track_url']}\n\n— Nosko Handyman"
+        )
+        return {"subject": subject, "html": html, "text": text, "template_id": tpl["template_id"], "template_name": tpl["name"]}
+    # Fallback hardcoded template (shouldn't happen after seed)
     return build_quote_email_template(job, amount, origin)
 
 
 @api.post("/jobs/{job_id}/send-quote")
 async def send_quote(job_id: str, payload: dict, request: Request, _: dict = Depends(require_admin)):
-    """Send the customer the quote email (admin can override subject/html/text)."""
+    """Send the customer the quote email (admin can override subject/html/text + supply line items + template)."""
     try:
         amount = float(payload.get("quoted_amount"))
     except (TypeError, ValueError):
@@ -899,26 +940,50 @@ async def send_quote(job_id: str, payload: dict, request: Request, _: dict = Dep
         raise HTTPException(404, "Job not found")
 
     origin = payload.get("origin") or request.headers.get("origin") or str(request.base_url).rstrip("/")
-    template = build_quote_email_template(job, amount, origin)
-    subject = (payload.get("subject") or template["subject"]).strip()
-    html = payload.get("html") or template["html"]
-    text = payload.get("text") or template["text"]
+    line_items = payload.get("line_items") or []
+    template_id = payload.get("template_id")
 
-    sent_ok = send_email(job["customer_email"], subject, html, text)
+    # Build defaults from template if subject/html not provided
+    tpl = None
+    if template_id:
+        tpl = await db.email_templates.find_one({"template_id": template_id}, {"_id": 0})
+    if not tpl:
+        tpl = await db.email_templates.find_one({"is_default": True}, {"_id": 0})
+    discount = job.get("promo_meta") or None
+    if tpl:
+        v = _template_vars_for_job(job, amount, origin, line_items, discount)
+        default_subject = _render_template(tpl["subject_template"], v)
+        default_html = _render_template(tpl["html_template"], v)
+    else:
+        legacy = build_quote_email_template(job, amount, origin)
+        default_subject, default_html = legacy["subject"], legacy["html"]
+
+    subject = (payload.get("subject") or default_subject).strip()
+    html = payload.get("html") or default_html
+    text = payload.get("text") or ""
+
+    sent_ok = send_email(job["customer_email"], subject, html, text or None)
     if not sent_ok:
         raise HTTPException(502, "Email send failed — check SMTP credentials.")
 
     now = datetime.now(timezone.utc).isoformat()
-    await db.jobs.update_one(
-        {"job_id": job_id},
-        {"$set": {
-            "quoted_amount": round(amount, 2),
-            "quote_status": "sent",
-            "quote_sent_at": now,
-            "last_quote_subject": subject,
-            "last_quote_html": html,
-        }},
-    )
+    set_doc = {
+        "quoted_amount": round(amount, 2),
+        "quote_status": "sent",
+        "quote_sent_at": now,
+        "last_quote_subject": subject,
+        "last_quote_html": html,
+        "quote_line_items": line_items,
+        "quote_template_id": template_id,
+    }
+    await db.jobs.update_one({"job_id": job_id}, {"$set": set_doc})
+
+    # Mark promo code as used (single-use) now that the quote has been delivered
+    if job.get("promo_meta") and job["promo_meta"].get("code_id"):
+        await db.discount_codes.update_one(
+            {"code_id": job["promo_meta"]["code_id"], "used_at": None},
+            {"$set": {"used_at": now, "used_on_job_id": job_id}},
+        )
     return {"ok": True, "quote_sent_at": now, "to": job["customer_email"]}
 
 
@@ -1281,6 +1346,420 @@ async def admin_stats(_: dict = Depends(require_admin)):
     }
 
 
+# -------------------- Newsletter, discount codes, email templates, blasts --------------------
+import random
+import string as _string
+
+
+def _new_code(prefix: str = "NOSKO") -> str:
+    suffix = "".join(random.choices(_string.ascii_uppercase + _string.digits, k=6))
+    return f"{prefix}{suffix}"
+
+
+async def _generate_unique_code(prefix: str = "NOSKO") -> str:
+    for _ in range(8):
+        c = _new_code(prefix)
+        if not await db.discount_codes.find_one({"code": c}):
+            return c
+    return f"{prefix}{uuid.uuid4().hex[:8].upper()}"
+
+
+def _email_signup_template(code: str, percent_off: int, contact_email: str, domain: str) -> dict:
+    subject = f"Your {percent_off}% off code is {code}"
+    html = f"""<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0A0A0A">
+  <div style="background:#FFD600;padding:18px 24px;border:2px solid #0A0A0A">
+    <h1 style="margin:0;font-size:22px">WELCOME TO NOSKO</h1>
+  </div>
+  <div style="padding:24px;border:2px solid #0A0A0A;border-top:0">
+    <p>Thanks for joining the list. Here's your one-time discount code:</p>
+    <div style="background:#0A0A0A;color:#FFD600;padding:18px 24px;margin:18px 0;text-align:center">
+      <div style="font-size:12px;letter-spacing:2px">{percent_off}% OFF YOUR FIRST QUOTE</div>
+      <div style="font-size:30px;font-weight:bold;letter-spacing:1px;margin-top:6px">{code}</div>
+    </div>
+    <p>Just paste it in the Promo code field when you request a quote at <a href="https://{domain}">{domain}</a>.</p>
+    <p style="font-size:12px;color:#666">One-time use. One code per email. Expires when you use it.</p>
+    <p>— Nosko Handyman · {contact_email}</p>
+  </div>
+</div>"""
+    text = (
+        f"Welcome to Nosko!\n\nYour {percent_off}% off code: {code}\n\n"
+        f"Use it in the Promo code field at https://{domain}/request\n"
+        f"One-time use, one per email.\n\n— Nosko Handyman"
+    )
+    return {"subject": subject, "html": html, "text": text}
+
+
+async def _get_setting(key: str, default):
+    s = await db.site_settings.find_one({"key": "default"}, {"_id": 0})
+    if not s:
+        return default
+    v = s.get(key)
+    return default if v in (None, "") else v
+
+
+@api.post("/subscribers")
+async def subscribe(payload: dict):
+    email = (payload.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "Valid email required")
+    existing = await db.subscribers.find_one({"email": email}, {"_id": 0})
+    if existing:
+        code_doc = await db.discount_codes.find_one({"code_id": existing.get("discount_code_id")}, {"_id": 0})
+        if code_doc and not code_doc.get("used_at"):
+            domain = await _get_setting("website_domain", "noskotx.com")
+            contact = await _get_setting("contact_email", COMPANY_EMAIL)
+            tmpl = _email_signup_template(code_doc["code"], code_doc["percent_off"], contact, domain)
+            try:
+                send_email(email, tmpl["subject"], tmpl["html"], tmpl["text"])
+            except Exception:
+                pass
+            return {"already_subscribed": True, "code": code_doc["code"], "percent_off": code_doc["percent_off"]}
+        return {"already_subscribed": True, "code": None, "message": "Welcome back — your previous code was already used."}
+
+    percent_off = int(await _get_setting("signup_default_percent_off", 15))
+    code = await _generate_unique_code("NOSKO")
+    code_id = f"dc_{uuid.uuid4().hex[:10]}"
+    now = datetime.now(timezone.utc).isoformat()
+    await db.discount_codes.insert_one({
+        "code_id": code_id, "code": code, "percent_off": percent_off, "email": email,
+        "issued_at": now, "used_at": None, "used_on_job_id": None,
+        "created_by": "auto_signup", "notes": "",
+    })
+    await db.subscribers.insert_one({
+        "sub_id": f"sub_{uuid.uuid4().hex[:10]}",
+        "email": email, "subscribed_at": now,
+        "source": payload.get("source") or "landing_footer",
+        "discount_code_id": code_id,
+    })
+
+    domain = await _get_setting("website_domain", "noskotx.com")
+    contact = await _get_setting("contact_email", COMPANY_EMAIL)
+    tmpl = _email_signup_template(code, percent_off, contact, domain)
+    sent = False
+    try:
+        sent = send_email(email, tmpl["subject"], tmpl["html"], tmpl["text"])
+    except Exception as e:
+        logger.error(f"Signup email failed for {email}: {e}")
+    return {"ok": True, "code": code, "percent_off": percent_off, "email_sent": sent}
+
+
+@api.get("/subscribers")
+async def list_subscribers(_: dict = Depends(require_admin)):
+    subs = [s async for s in db.subscribers.find({}, {"_id": 0}).sort("subscribed_at", -1)]
+    code_ids = [s["discount_code_id"] for s in subs if s.get("discount_code_id")]
+    codes_by_id = {}
+    if code_ids:
+        async for c in db.discount_codes.find({"code_id": {"$in": code_ids}}, {"_id": 0}):
+            codes_by_id[c["code_id"]] = c
+    for s in subs:
+        c = codes_by_id.get(s.get("discount_code_id")) or {}
+        s["code"] = c.get("code")
+        s["percent_off"] = c.get("percent_off")
+        s["code_used"] = bool(c.get("used_at"))
+        s["code_used_on_job_id"] = c.get("used_on_job_id")
+    return subs
+
+
+@api.delete("/subscribers/{sub_id}")
+async def delete_subscriber(sub_id: str, _: dict = Depends(require_admin)):
+    res = await db.subscribers.delete_one({"sub_id": sub_id})
+    return {"deleted": res.deleted_count}
+
+
+@api.get("/discount-codes")
+async def list_discount_codes(_: dict = Depends(require_admin)):
+    return [c async for c in db.discount_codes.find({}, {"_id": 0}).sort("issued_at", -1)]
+
+
+@api.post("/discount-codes")
+async def create_discount_code(payload: dict, _: dict = Depends(require_admin)):
+    try:
+        percent_off = int(payload.get("percent_off"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "percent_off (integer 1-100) required")
+    if percent_off < 1 or percent_off > 100:
+        raise HTTPException(400, "percent_off must be 1-100")
+    code = (payload.get("code") or "").strip().upper() or await _generate_unique_code("NOSKO")
+    if await db.discount_codes.find_one({"code": code}):
+        raise HTTPException(409, "Code already exists")
+    doc = {
+        "code_id": f"dc_{uuid.uuid4().hex[:10]}",
+        "code": code, "percent_off": percent_off,
+        "email": (payload.get("email") or "").strip().lower() or None,
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "used_at": None, "used_on_job_id": None,
+        "created_by": "admin_manual",
+        "notes": payload.get("notes") or "",
+    }
+    await db.discount_codes.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/discount-codes/{code_id}")
+async def update_discount_code(code_id: str, payload: dict, _: dict = Depends(require_admin)):
+    update = {}
+    if "percent_off" in payload:
+        try:
+            p = int(payload["percent_off"])
+            if 1 <= p <= 100:
+                update["percent_off"] = p
+        except (TypeError, ValueError):
+            raise HTTPException(400, "percent_off must be 1-100")
+    if "code" in payload:
+        new_code = (payload["code"] or "").strip().upper()
+        if new_code:
+            existing = await db.discount_codes.find_one({"code": new_code, "code_id": {"$ne": code_id}})
+            if existing:
+                raise HTTPException(409, "Another code already uses that string")
+            update["code"] = new_code
+    if "notes" in payload:
+        update["notes"] = payload["notes"] or ""
+    if payload.get("reset_usage"):
+        update["used_at"] = None
+        update["used_on_job_id"] = None
+    if not update:
+        raise HTTPException(400, "No editable fields supplied")
+    res = await db.discount_codes.update_one({"code_id": code_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Code not found")
+    return await db.discount_codes.find_one({"code_id": code_id}, {"_id": 0})
+
+
+@api.delete("/discount-codes/{code_id}")
+async def delete_discount_code(code_id: str, _: dict = Depends(require_admin)):
+    res = await db.discount_codes.delete_one({"code_id": code_id})
+    return {"deleted": res.deleted_count}
+
+
+@api.post("/discount-codes/validate")
+async def validate_discount_code(payload: dict):
+    code = (payload.get("code") or "").strip().upper()
+    if not code:
+        return {"valid": False, "error": "Enter a code"}
+    doc = await db.discount_codes.find_one({"code": code}, {"_id": 0})
+    if not doc:
+        return {"valid": False, "error": "Code not found"}
+    if doc.get("used_at"):
+        return {"valid": False, "error": "This code has already been used"}
+    return {"valid": True, "percent_off": doc["percent_off"], "code": code}
+
+
+DEFAULT_TEMPLATES = [
+    {
+        "name": "Friendly quote",
+        "subject_template": "Your Nosko quote — Job {{job_id}}",
+        "html_template": """<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0A0A0A">
+  <div style="background:#FFD600;padding:18px 24px;border:2px solid #0A0A0A">
+    <h1 style="margin:0;font-size:24px">YOUR QUOTE</h1>
+  </div>
+  <div style="padding:24px;border:2px solid #0A0A0A;border-top:0">
+    <p>Hey {{first_name}},</p>
+    <p>Thanks for the photo of your {{service_type}} at {{address}}. Here's what I'm thinking:</p>
+    {{breakdown_block}}
+    <div style="background:#0A0A0A;color:#FFD600;padding:18px 24px;margin:18px 0;text-align:center">
+      <div style="font-size:12px;letter-spacing:2px">TOTAL</div>
+      <div style="font-size:42px;font-weight:bold;letter-spacing:-1px">${{amount}}</div>
+    </div>
+    <p>Reply to lock in your {{preferred_date}} slot, or hit the button:</p>
+    <p style="margin:24px 0"><a href="{{track_url}}" style="background:#0A0A0A;color:#FFD600;padding:12px 20px;text-decoration:none;border:2px solid #0A0A0A;display:inline-block">VIEW JOB</a></p>
+    <p>— Nosson · Nosko Handyman<br>{{contact_email}}</p>
+  </div>
+</div>""",
+        "is_default": True,
+    },
+    {
+        "name": "Formal",
+        "subject_template": "Quote for {{service_type}} — Job {{job_id}}",
+        "html_template": """<div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0A0A0A">
+  <div style="border-bottom:3px solid #0A0A0A;padding-bottom:12px">
+    <h2 style="margin:0">Nosko Handyman — Quote</h2>
+    <div style="font-size:12px;color:#666">{{contact_email}}</div>
+  </div>
+  <div style="padding:18px 0">
+    <p>Dear {{customer_name}},</p>
+    <p>Thank you for considering Nosko Handyman for your {{service_type}} project at {{address}}. Please find our quote below:</p>
+    {{breakdown_block}}
+    <table style="width:100%;border-collapse:collapse;margin:18px 0">
+      <tr><td style="padding:8px;border-top:2px solid #000;font-weight:bold">Total</td><td style="padding:8px;border-top:2px solid #000;text-align:right;font-weight:bold">${{amount}}</td></tr>
+    </table>
+    <p>Should you wish to proceed, kindly reply to this email or use the link below to confirm.</p>
+    <p><a href="{{track_url}}">View job status →</a></p>
+    <p>Regards,<br>Nosson Kosowsky<br>Nosko Handyman</p>
+  </div>
+</div>""",
+        "is_default": False,
+    },
+    {
+        "name": "Quick price",
+        "subject_template": "${{amount}} for your {{service_type}}",
+        "html_template": """<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto">
+  <p>Hi {{first_name}},</p>
+  <p>Quick price for {{service_type}} at {{address}}:</p>
+  <div style="background:#FFD600;padding:24px;text-align:center;border:2px solid #000;margin:14px 0">
+    <div style="font-size:48px;font-weight:bold;letter-spacing:-2px">${{amount}}</div>
+  </div>
+  {{breakdown_block}}
+  <p>Reply yes to book — <a href="{{track_url}}">track here</a>.</p>
+  <p>— Nosson</p>
+</div>""",
+        "is_default": False,
+    },
+]
+
+
+async def _seed_default_templates():
+    if await db.email_templates.count_documents({}) == 0:
+        for t in DEFAULT_TEMPLATES:
+            await db.email_templates.insert_one({
+                "template_id": f"tpl_{uuid.uuid4().hex[:10]}",
+                "name": t["name"],
+                "subject_template": t["subject_template"],
+                "html_template": t["html_template"],
+                "is_default": t["is_default"],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+
+def _render_template(tpl_str: str, vars_: dict) -> str:
+    out = tpl_str
+    for k, v in vars_.items():
+        out = out.replace("{{" + k + "}}", str(v if v is not None else ""))
+    return out
+
+
+def _build_breakdown_block(line_items: list) -> str:
+    if not line_items:
+        return ""
+    rows = "".join(
+        f"<tr><td style='padding:6px 0;border-bottom:1px dashed #ccc'>{li.get('label','')}</td>"
+        f"<td style='padding:6px 0;border-bottom:1px dashed #ccc;text-align:right'>${float(li.get('amount',0)):.2f}</td></tr>"
+        for li in line_items
+    )
+    return (
+        "<table style='width:100%;border-collapse:collapse;margin:8px 0;font-size:14px'>"
+        + rows + "</table>"
+    )
+
+
+def _template_vars_for_job(job: dict, amount: float, origin: Optional[str], line_items: list, discount: Optional[dict]) -> dict:
+    track_url = f"{origin or 'https://nosko.com'}/track/{job['job_id']}"
+    first = (job.get("customer_name") or "").split(" ")[0] or "there"
+    breakdown_html = _build_breakdown_block(line_items)
+    if discount:
+        breakdown_html += (
+            f"<div style='background:#FFD600;border:2px solid #000;padding:10px 14px;margin:8px 0;font-size:14px'>"
+            f"Promo applied · <b>{discount.get('code','')}</b> · {discount.get('percent_off',0)}% off</div>"
+        )
+    return {
+        "job_id": job["job_id"],
+        "customer_name": job.get("customer_name", ""),
+        "first_name": first,
+        "service_type": job.get("service_type", "handyman"),
+        "address": job.get("address", ""),
+        "amount": f"{amount:.2f}",
+        "preferred_date": job.get("preferred_date") or "your preferred",
+        "track_url": track_url,
+        "contact_email": COMPANY_EMAIL,
+        "breakdown_block": breakdown_html,
+    }
+
+
+@api.get("/email-templates")
+async def list_email_templates(_: dict = Depends(require_admin)):
+    return [t async for t in db.email_templates.find({}, {"_id": 0}).sort("created_at", 1)]
+
+
+@api.post("/email-templates")
+async def create_email_template(payload: dict, _: dict = Depends(require_admin)):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    doc = {
+        "template_id": f"tpl_{uuid.uuid4().hex[:10]}",
+        "name": name,
+        "subject_template": payload.get("subject_template") or "Your Nosko quote",
+        "html_template": payload.get("html_template") or "",
+        "is_default": bool(payload.get("is_default", False)),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if doc["is_default"]:
+        await db.email_templates.update_many({}, {"$set": {"is_default": False}})
+    await db.email_templates.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/email-templates/{template_id}")
+async def update_email_template(template_id: str, payload: dict, _: dict = Depends(require_admin)):
+    update = {k: payload[k] for k in ("name", "subject_template", "html_template") if k in payload}
+    if "is_default" in payload:
+        update["is_default"] = bool(payload["is_default"])
+        if update["is_default"]:
+            await db.email_templates.update_many({}, {"$set": {"is_default": False}})
+    if not update:
+        raise HTTPException(400, "Nothing to update")
+    res = await db.email_templates.update_one({"template_id": template_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Template not found")
+    return await db.email_templates.find_one({"template_id": template_id}, {"_id": 0})
+
+
+@api.delete("/email-templates/{template_id}")
+async def delete_email_template(template_id: str, _: dict = Depends(require_admin)):
+    res = await db.email_templates.delete_one({"template_id": template_id})
+    return {"deleted": res.deleted_count}
+
+
+@api.post("/email-blasts/preview")
+async def preview_blast(payload: dict, _: dict = Depends(require_admin)):
+    subject = (payload.get("subject") or "").strip()
+    html = payload.get("html") or ""
+    if not subject:
+        raise HTTPException(400, "Subject required")
+    count = await db.subscribers.count_documents({})
+    return {"subject": subject, "html": html, "recipient_count": count}
+
+
+@api.post("/email-blasts")
+async def send_blast(payload: dict, _: dict = Depends(require_admin)):
+    subject = (payload.get("subject") or "").strip()
+    html = payload.get("html") or ""
+    text = payload.get("text") or ""
+    if not subject or not html:
+        raise HTTPException(400, "Subject and body required")
+    recipients = [s["email"] async for s in db.subscribers.find({}, {"_id": 0, "email": 1})]
+    sent_count = 0
+    failed = []
+    for email in recipients:
+        try:
+            ok = send_email(email, subject, html, text or None)
+            if ok:
+                sent_count += 1
+            else:
+                failed.append(email)
+        except Exception as e:
+            logger.error(f"Blast to {email} failed: {e}")
+            failed.append(email)
+    blast = {
+        "blast_id": f"blast_{uuid.uuid4().hex[:10]}",
+        "subject": subject, "html": html, "text": text,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "recipient_count": len(recipients),
+        "sent_count": sent_count, "failed_count": len(failed),
+    }
+    await db.email_blasts.insert_one(blast)
+    blast.pop("_id", None)
+    return blast
+
+
+@api.get("/email-blasts")
+async def list_blasts(_: dict = Depends(require_admin)):
+    return [b async for b in db.email_blasts.find({}, {"_id": 0}).sort("sent_at", -1).limit(50)]
+
+
+
+
 # -------------------- Availability blocking --------------------
 WEEKDAY_LABELS_PY = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # Python weekday() order
 
@@ -1358,6 +1837,10 @@ async def _startup():
         await db.users.create_index("referral_code")
         await db.password_reset_tokens.create_index("token", unique=True)
         await db.user_sessions.create_index("session_token", unique=True)
+        await db.subscribers.create_index("email", unique=True)
+        await db.discount_codes.create_index("code", unique=True)
+        await db.discount_codes.create_index("code_id", unique=True)
+        await _seed_default_templates()
     except Exception as e:
         logger.warning(f"Index creation: {e}")
 

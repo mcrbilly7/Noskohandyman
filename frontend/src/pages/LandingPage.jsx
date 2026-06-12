@@ -186,6 +186,24 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Newsletter signup */}
+      {(s.newsletter_enabled ?? true) && (
+        <section id="email-signup" className="bg-[#FFD600] border-b-2 border-black">
+          <div className="max-w-[1280px] mx-auto px-6 lg:px-10 py-14 grid lg:grid-cols-2 gap-8 items-center">
+            <div>
+              <div className="overline">{s.newsletter_overline || "Email list"}</div>
+              <h3 className="font-display text-3xl md:text-4xl tracking-tighter mt-2">
+                {s.newsletter_heading || `Get ${s.signup_default_percent_off ?? 15}% off your first job.`}
+              </h3>
+              <p className="text-sm mt-3 max-w-md">
+                {s.newsletter_subheading || "Drop your email — we'll send you a one-time discount code."}
+              </p>
+            </div>
+            <NewsletterForm defaultPercent={s.signup_default_percent_off ?? 15} />
+          </div>
+        </section>
+      )}
+
       {/* CTA */}
       <section className="bg-[#0A0A0A] text-white">
         <div className="max-w-[1280px] mx-auto px-6 lg:px-10 py-16 flex flex-wrap items-center justify-between gap-6">
@@ -199,5 +217,65 @@ export default function LandingPage() {
 
       <Footer settings={s} />
     </div>
+  );
+}
+
+function NewsletterForm({ defaultPercent }) {
+  const [email, setEmail] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [result, setResult] = React.useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/subscribers", { email: email.trim(), source: "landing_footer" });
+      setResult(r.data);
+    } catch (err) {
+      setResult({ error: err?.response?.data?.detail || "Could not subscribe" });
+    } finally { setBusy(false); }
+  };
+
+  if (result?.code) {
+    return (
+      <div className="bg-black text-[#FFD600] border-2 border-black p-6" data-testid="newsletter-success">
+        <div className="overline">You're in</div>
+        <p className="text-sm mt-2 text-white">Check your inbox — we sent your code. Or use it now:</p>
+        <div className="font-mono text-2xl md:text-3xl tracking-wider mt-3 break-all" data-testid="newsletter-code">{result.code}</div>
+        <p className="text-xs mt-2 text-white/70">{result.percent_off}% off your next quote · one-time use</p>
+      </div>
+    );
+  }
+
+  if (result && !result.code) {
+    return (
+      <div className="bg-black text-white border-2 border-black p-6" data-testid="newsletter-already">
+        <div className="overline text-[#FFD600]">Welcome back</div>
+        <p className="text-sm mt-2">{result.error || result.message || "You're already on our list — and your code's already been used. Stay tuned for future offers."}</p>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col sm:flex-row gap-2" data-testid="newsletter-form">
+      <input
+        type="email"
+        required
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="you@email.com"
+        className="flex-1 border-2 border-black px-4 py-3 bg-white font-mono text-sm focus:outline-none"
+        data-testid="newsletter-email-input"
+      />
+      <button
+        type="submit"
+        disabled={busy}
+        className="bg-black text-[#FFD600] border-2 border-black px-6 py-3 overline text-sm hover:bg-neutral-800 disabled:opacity-50 whitespace-nowrap"
+        data-testid="newsletter-submit-btn"
+      >
+        {busy ? "Sending…" : `Send me ${defaultPercent}% off`}
+      </button>
+    </form>
   );
 }

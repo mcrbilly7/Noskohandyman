@@ -4,7 +4,7 @@ import Navbar from "@/components/shared/Navbar";
 import Footer from "@/components/shared/Footer";
 import FileUploader from "@/components/shared/FileUploader";
 import { Calendar } from "@/components/ui/calendar";
-import { CheckCircle2, Loader2, Clock } from "lucide-react";
+import { CheckCircle2, Loader2, Clock, Tag, Mail, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 
 const TIME_SLOTS = [
@@ -44,6 +44,9 @@ export default function JobRequestPage() {
   const [slot, setSlot] = useState("flexible");
   const [blockedSet, setBlockedSet] = useState(new Set());
   const [blockedWeekdays, setBlockedWeekdays] = useState(new Set());
+  const [promo, setPromo] = useState("");
+  const [promoState, setPromoState] = useState(null); // {valid, percent_off, error} | null
+  const [promoChecking, setPromoChecking] = useState(false);
   const [form, setForm] = useState({
     customer_name: "",
     customer_email: "",
@@ -62,6 +65,20 @@ export default function JobRequestPage() {
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
+  const validatePromo = async () => {
+    const c = promo.trim().toUpperCase();
+    if (!c) { setPromoState(null); return; }
+    setPromoChecking(true);
+    try {
+      const r = await api.post("/discount-codes/validate", { code: c });
+      setPromoState(r.data);
+      if (r.data.valid) toast.success(`Code applied — ${r.data.percent_off}% off`);
+      else toast.error(r.data.error || "Code invalid");
+    } catch {
+      setPromoState({ valid: false, error: "Could not validate code" });
+    } finally { setPromoChecking(false); }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
@@ -71,8 +88,9 @@ export default function JobRequestPage() {
         photo_paths: photos,
         preferred_date: fmtDate(date) || null,
         preferred_time_slot: slot,
+        promo_code: promoState?.valid ? promoState.code : null,
       });
-      setDone(res.data);
+      setDone({ ...res.data, _promoApplied: promoState?.valid ? promoState : null });
       toast.success("Quote request sent!");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Could not submit");
@@ -86,24 +104,72 @@ export default function JobRequestPage() {
     return (
       <div className="bg-white min-h-screen flex flex-col">
         <Navbar />
-        <main className="flex-1 max-w-[900px] mx-auto px-6 py-20 w-full">
-          <div className="border-2 border-black p-10 fade-in">
-            <CheckCircle2 className="w-12 h-12 text-[#16A34A]" />
-            <h1 className="font-display text-4xl mt-4 tracking-tighter">Request received.</h1>
-            <p className="text-neutral-700 mt-3">
-              Job <span className="font-mono">{done.job_id}</span> is in the queue. We'll be in touch at <b>{done.customer_email}</b>.
-            </p>
-            {done.preferred_date && (
-              <p className="text-neutral-700 mt-2 inline-flex items-center gap-2">
-                <Clock className="w-4 h-4" /> Preferred: <b>{done.preferred_date}</b> · {TIME_SLOTS.find(t => t.id === done.preferred_time_slot)?.label || done.preferred_time_slot}
-              </p>
-            )}
-            <div className="mt-8 border-2 border-black bg-[#FFD600] p-5" data-testid="job-track-link-block">
-              <div className="overline">Track your job anytime — no login</div>
-              <div className="font-mono text-sm break-all mt-1">{trackUrl}</div>
-              <a href={trackUrl} className="btn-brutal dark mt-3 inline-flex" data-testid="job-track-btn">Open tracking page</a>
+        <main className="flex-1 max-w-[900px] mx-auto px-4 sm:px-6 py-12 sm:py-16 w-full">
+          <div className="fade-in">
+            <div className="flex items-center justify-center w-20 h-20 bg-[#16A34A] border-4 border-black mb-6 mx-auto" data-testid="request-success-icon">
+              <CheckCircle2 className="w-12 h-12 text-white" strokeWidth={3} />
             </div>
-            <div className="flex flex-wrap gap-2 mt-6">
+            <div className="overline text-center">Confirmed</div>
+            <h1 className="font-display text-4xl sm:text-5xl tracking-tighter text-center mt-2" data-testid="request-success-title">
+              Quote request submitted.
+            </h1>
+            <p className="text-neutral-700 mt-4 text-center max-w-lg mx-auto">
+              We received your request and we'll get back to you with a custom quote within <b>24 hours</b>.
+            </p>
+
+            <div className="grid sm:grid-cols-2 gap-0 border-2 border-black mt-10">
+              <div className="p-5 border-r-0 sm:border-r border-b sm:border-b-0 border-black">
+                <div className="overline">Job ID</div>
+                <div className="font-mono text-lg mt-1" data-testid="request-success-jobid">{done.job_id}</div>
+              </div>
+              <div className="p-5">
+                <div className="overline">Confirmation sent to</div>
+                <div className="text-sm mt-1 break-all">{done.customer_email}</div>
+              </div>
+              {done.preferred_date && (
+                <div className="p-5 border-t-2 border-black sm:col-span-2">
+                  <div className="overline">Your preferred time</div>
+                  <div className="text-sm mt-1 inline-flex items-center gap-2"><Clock className="w-4 h-4" /> {done.preferred_date} · {TIME_SLOTS.find(t => t.id === done.preferred_time_slot)?.label || done.preferred_time_slot}</div>
+                </div>
+              )}
+              {done._promoApplied?.valid && (
+                <div className="p-5 border-t-2 border-black sm:col-span-2 bg-[#FFD600]">
+                  <div className="overline inline-flex items-center gap-1"><Tag className="w-3 h-3" /> Promo applied</div>
+                  <div className="font-mono text-sm mt-1">{done._promoApplied.code} · {done._promoApplied.percent_off}% off your quote</div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-10 border-2 border-black bg-[#0A0A0A] text-white p-5" data-testid="job-track-link-block">
+              <div className="overline text-[#FFD600]">Track your job anytime — no login</div>
+              <div className="font-mono text-xs break-all mt-2 opacity-90">{trackUrl}</div>
+              <a href={trackUrl} className="inline-flex items-center gap-2 mt-4 bg-[#FFD600] text-black border-2 border-[#FFD600] px-5 py-2 overline text-xs hover:bg-yellow-300" data-testid="job-track-btn">
+                Open tracking page →
+              </a>
+            </div>
+
+            <div className="mt-12">
+              <div className="overline">What happens next</div>
+              <div className="grid sm:grid-cols-3 gap-0 border-2 border-black mt-3">
+                <div className="p-4 border-r-0 sm:border-r border-b sm:border-b-0 border-black">
+                  <div className="font-display text-2xl tracking-tighter">1</div>
+                  <div className="overline mt-1">Review</div>
+                  <p className="text-sm mt-1">Nosson reviews the photos and details.</p>
+                </div>
+                <div className="p-4 border-r-0 sm:border-r border-b sm:border-b-0 border-black">
+                  <div className="font-display text-2xl tracking-tighter">2</div>
+                  <div className="overline mt-1 inline-flex items-center gap-1"><Mail className="w-3 h-3" /> Quote</div>
+                  <p className="text-sm mt-1">You get a custom quote by email within 24 hrs.</p>
+                </div>
+                <div className="p-4">
+                  <div className="font-display text-2xl tracking-tighter">3</div>
+                  <div className="overline mt-1">Book</div>
+                  <p className="text-sm mt-1">Reply to confirm and we lock in your time slot.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mt-8 justify-center">
               <a href="/" className="btn-brutal ghost" data-testid="request-success-home">Back home</a>
             </div>
           </div>
@@ -158,6 +224,41 @@ export default function JobRequestPage() {
             <div>
               <label className="overline">Photo of the job *</label>
               <FileUploader folder="jobs" value={photos} onChange={setPhotos} testid="job-photos" />
+            </div>
+
+            {/* Promo code */}
+            <div className="border-2 border-dashed border-black p-4" data-testid="promo-block">
+              <label className="overline inline-flex items-center gap-1"><Tag className="w-3 h-3" /> Promo code (optional)</label>
+              <div className="flex gap-2 mt-1">
+                <input
+                  type="text"
+                  value={promo}
+                  onChange={(e) => { setPromo(e.target.value); setPromoState(null); }}
+                  placeholder="NOSKO15OFF"
+                  className="flex-1 uppercase font-mono"
+                  data-testid="promo-input"
+                />
+                <button
+                  type="button"
+                  onClick={validatePromo}
+                  disabled={promoChecking || !promo.trim()}
+                  className="overline text-[11px] border-2 border-black px-3 py-1 bg-[#FFD600] hover:bg-yellow-300 disabled:opacity-40"
+                  data-testid="promo-apply-btn"
+                >
+                  {promoChecking ? <Loader2 className="w-3 h-3 animate-spin" /> : "Apply"}
+                </button>
+              </div>
+              {promoState?.valid && (
+                <div className="mt-2 text-xs font-mono text-green-700" data-testid="promo-valid">
+                  ✓ {promoState.percent_off}% off applied — discount shows on your quote email
+                </div>
+              )}
+              {promoState && !promoState.valid && (
+                <div className="mt-2 text-xs text-red-600" data-testid="promo-invalid">{promoState.error}</div>
+              )}
+              <div className="mt-2 text-[11px] text-neutral-500">
+                Don't have one? <a href="/#email-signup" className="underline">Join our list</a> — get one free.
+              </div>
             </div>
 
             {/* Scheduling */}
