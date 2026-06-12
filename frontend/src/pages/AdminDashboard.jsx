@@ -4,9 +4,11 @@ import { api, fileUrl } from "@/lib/api";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import FileUploader from "@/components/shared/FileUploader";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Image as ImageIcon, Trash2, ShieldAlert, CalendarClock } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Image as ImageIcon, Trash2, ShieldAlert, Send, Loader2, Check } from "lucide-react";
 import { toast } from "sonner";
 import AvailabilityEditor from "@/components/shared/AvailabilityEditor";
+import MyWeekView from "@/components/shared/MyWeekView";
 
 const FOUNDING_EMAILS = ["noskotx@gmail.com", "nossonkosowsky32@gmail.com"];
 
@@ -69,47 +71,17 @@ export default function AdminDashboard() {
           </TabsList>
 
           <TabsContent value="jobs" className="mt-4">
-            <div className="border-2 border-black bg-white" data-testid="admin-jobs-section">
+            <div className="grid gap-6">
+              <MyWeekView jobs={jobs} />
+              <div className="border-2 border-black bg-white" data-testid="admin-jobs-section">
               {jobs.length === 0 ? <p className="p-6 text-sm text-neutral-500">No job requests yet.</p> : (
                 <div className="divide-y divide-black/10">
                   {jobs.map((j) => (
-                    <div key={j.job_id} className="p-5 grid lg:grid-cols-12 gap-4">
-                      <div className="lg:col-span-2 flex gap-2 flex-wrap">
-                        {(j.photo_paths || []).slice(0, 4).map((p, idx) => (
-                          <img key={idx} src={fileUrl(p)} alt="" className="w-20 h-20 object-cover border border-black" />
-                        ))}
-                        {(j.photo_paths || []).length === 0 && <div className="w-20 h-20 border border-black bg-neutral-100 flex items-center justify-center text-xs">no img</div>}
-                      </div>
-                      <div className="lg:col-span-5">
-                        <div className="overline">{j.service_type}</div>
-                        <div className="font-display text-xl tracking-tighter">{j.customer_name}</div>
-                        <div className="text-sm text-neutral-600">{j.customer_email} · {j.customer_phone || "—"}</div>
-                        <div className="text-sm mt-1">{j.address}</div>
-                        <p className="text-sm mt-2 max-w-prose">{j.description}</p>
-                        {j.preferred_date && (
-                          <span className="overline text-[10px] inline-block mt-2 bg-black text-[#FFD600] px-2 py-0.5">
-                            ⏱ {j.preferred_date} · {j.preferred_time_slot}
-                          </span>
-                        )}
-                      </div>
-                      <div className="lg:col-span-3">
-                        <div className="overline">Update status</div>
-                        <select className="mt-1" onChange={(e) => setStatus(j.job_id, e.target.value)} value={j.status} data-testid={`status-${j.job_id}`}>
-                          <option value="new">new</option><option value="assigned">assigned</option><option value="in_progress">in_progress</option><option value="completed">completed</option><option value="cancelled">cancelled</option>
-                        </select>
-                        <a href={`/track/${j.job_id}`} target="_blank" rel="noreferrer" className="overline text-[10px] underline mt-2 inline-block" data-testid={`track-link-${j.job_id}`}>
-                          View customer tracking page →
-                        </a>
-                      </div>
-                      <div className="lg:col-span-2 text-right">
-                        <div className="overline">Quote</div>
-                        <div className="font-display text-3xl tracking-tighter">${j.quoted_amount.toFixed(2)}</div>
-                        <div className="overline text-[10px] bg-black text-[#FFD600] inline-block px-2 py-0.5 mt-1">{j.status}</div>
-                      </div>
-                    </div>
+                    <JobRow key={j.job_id} job={j} onChanged={refreshAll} setStatus={setStatus} />
                   ))}
                 </div>
               )}
+            </div>
             </div>
           </TabsContent>
 
@@ -121,7 +93,7 @@ export default function AdminDashboard() {
             <div className="border-2 border-black bg-white" data-testid="admin-team-section">              <div className="p-4 border-b border-black bg-[#F9FAFB] flex items-center justify-between">
                 <div>
                   <div className="overline">All users · {users.length}</div>
-                  <div className="text-sm text-neutral-700">Founders can change anyone's role. Admins & developers see this list read-only.</div>
+                  <div className="text-sm text-neutral-700">Founders can change anyone&apos;s role. Admins &amp; developers see this list read-only.</div>
                 </div>
                 {!isFounder && <span className="overline text-[10px] inline-flex items-center gap-1 bg-yellow-100 border border-black px-2 py-1"><ShieldAlert className="w-3 h-3" /> Founder-only edits</span>}
               </div>
@@ -173,6 +145,250 @@ export default function AdminDashboard() {
     </DashboardLayout>
   );
 }
+
+function JobRow({ job, onChanged, setStatus }) {
+  const j = job;
+  const [price, setPrice] = useState(j.quoted_amount ?? "");
+  const [savingPrice, setSavingPrice] = useState(false);
+  const [openSend, setOpenSend] = useState(false);
+
+  const savePrice = async () => {
+    const amt = parseFloat(price);
+    if (Number.isNaN(amt) || amt < 0) { toast.error("Enter a valid price"); return; }
+    setSavingPrice(true);
+    try {
+      await api.put(`/jobs/${j.job_id}/quote`, { quoted_amount: amt });
+      toast.success("Price saved (not emailed yet)");
+      onChanged();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+    } finally { setSavingPrice(false); }
+  };
+
+  const quoteSent = j.quote_status === "sent";
+  const hasPrice = j.quoted_amount != null && j.quoted_amount !== "";
+
+  return (
+    <div className="p-4 sm:p-5 grid lg:grid-cols-12 gap-4">
+      <div className="lg:col-span-2 flex gap-2 flex-wrap">
+        {(j.photo_paths || []).slice(0, 4).map((p, idx) => (
+          <img key={idx} src={fileUrl(p)} alt="" className="w-16 h-16 sm:w-20 sm:h-20 object-cover border border-black" />
+        ))}
+        {(j.photo_paths || []).length === 0 && <div className="w-20 h-20 border border-black bg-neutral-100 flex items-center justify-center text-xs">no img</div>}
+      </div>
+      <div className="lg:col-span-5">
+        <div className="overline">{j.service_type}</div>
+        <div className="font-display text-xl tracking-tighter">{j.customer_name}</div>
+        <div className="text-sm text-neutral-600 break-all">{j.customer_email} · {j.customer_phone || "—"}</div>
+        <div className="text-sm mt-1">{j.address}</div>
+        <p className="text-sm mt-2 max-w-prose">{j.description}</p>
+        {j.preferred_date && (
+          <span className="overline text-[10px] inline-block mt-2 bg-black text-[#FFD600] px-2 py-0.5">
+            {j.preferred_date} · {j.preferred_time_slot}
+          </span>
+        )}
+      </div>
+      <div className="lg:col-span-2">
+        <div className="overline">Status</div>
+        <select className="mt-1 w-full" onChange={(e) => setStatus(j.job_id, e.target.value)} value={j.status} data-testid={`status-${j.job_id}`}>
+          <option value="new">new</option><option value="assigned">assigned</option><option value="in_progress">in_progress</option><option value="completed">completed</option><option value="cancelled">cancelled</option>
+        </select>
+        <a href={`/track/${j.job_id}`} target="_blank" rel="noreferrer" className="overline text-[10px] underline mt-2 inline-block" data-testid={`track-link-${j.job_id}`}>
+          Customer tracking page →
+        </a>
+      </div>
+      <div className="lg:col-span-3 border-l-0 lg:border-l border-black/20 lg:pl-4">
+        <div className="overline">Set quote</div>
+        <div className="flex items-center gap-2 mt-1">
+          <span className="font-display text-2xl tracking-tighter">$</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="0.00"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            className="font-display text-2xl tracking-tighter w-full"
+            data-testid={`quote-input-${j.job_id}`}
+          />
+        </div>
+        <div className="flex flex-wrap gap-2 mt-2">
+          <button
+            type="button"
+            onClick={savePrice}
+            disabled={savingPrice || price === "" || price === null}
+            className="overline text-[11px] border-2 border-black px-3 py-1.5 bg-white hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1"
+            data-testid={`save-quote-${j.job_id}`}
+          >
+            {savingPrice ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            Save price
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const amt = parseFloat(price);
+              if (Number.isNaN(amt) || amt < 0) { toast.error("Enter a price first"); return; }
+              setOpenSend(true);
+            }}
+            className="overline text-[11px] border-2 border-black px-3 py-1.5 bg-[#FFD600] hover:bg-yellow-300 inline-flex items-center gap-1"
+            data-testid={`send-quote-btn-${j.job_id}`}
+          >
+            <Send className="w-3 h-3" /> Send quote
+          </button>
+        </div>
+        <div className="mt-2 text-[11px]">
+          {quoteSent ? (
+            <span className="overline bg-green-200 border border-black px-2 py-0.5" data-testid={`quote-sent-${j.job_id}`}>
+              SENT {j.quote_sent_at ? "· " + new Date(j.quote_sent_at).toLocaleDateString() : ""}
+            </span>
+          ) : hasPrice ? (
+            <span className="overline bg-yellow-100 border border-black px-2 py-0.5">DRAFT — not emailed</span>
+          ) : (
+            <span className="overline bg-neutral-100 border border-black px-2 py-0.5">PENDING — set a price</span>
+          )}
+        </div>
+      </div>
+
+      {openSend && (
+        <SendQuoteDialog
+          job={j}
+          amount={parseFloat(price)}
+          open={openSend}
+          onClose={() => setOpenSend(false)}
+          onSent={() => { setOpenSend(false); onChanged(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SendQuoteDialog({ job, amount, open, onClose, onSent }) {
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [html, setHtml] = useState("");
+  const [text, setText] = useState("");
+  const [mode, setMode] = useState("edit");  // edit | preview
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    api.post(`/jobs/${job.job_id}/quote-preview`, { quoted_amount: amount, origin: window.location.origin })
+      .then((r) => {
+        setSubject(r.data.subject || "");
+        setHtml(r.data.html || "");
+        setText(r.data.text || "");
+      })
+      .catch(() => toast.error("Could not load template"))
+      .finally(() => setLoading(false));
+  }, [open, job.job_id, amount]);
+
+  const send = async () => {
+    setSending(true);
+    try {
+      await api.post(`/jobs/${job.job_id}/send-quote`, {
+        quoted_amount: amount,
+        subject,
+        html,
+        text,
+        origin: window.location.origin,
+      });
+      toast.success(`Quote emailed to ${job.customer_email}`);
+      onSent();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Send failed");
+    } finally { setSending(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto bg-white border-2 border-black rounded-none p-0">
+        <DialogHeader className="p-5 border-b-2 border-black bg-[#FFD600]">
+          <DialogTitle className="font-display text-2xl tracking-tighter">
+            Send quote — ${Number.isFinite(amount) ? amount.toFixed(2) : "—"}
+          </DialogTitle>
+          <p className="text-xs text-neutral-700">To: <b>{job.customer_email}</b> · Job {job.job_id}</p>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="p-10 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin" /></div>
+        ) : (
+          <div className="p-5 grid gap-4">
+            <div>
+              <label className="overline">Subject</label>
+              <input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                data-testid="quote-email-subject"
+                className="w-full"
+              />
+            </div>
+
+            <div className="border-2 border-black">
+              <div className="flex border-b-2 border-black">
+                <button
+                  type="button"
+                  onClick={() => setMode("edit")}
+                  className={`overline text-[11px] px-4 py-2 ${mode === "edit" ? "bg-black text-[#FFD600]" : "bg-white"}`}
+                  data-testid="quote-mode-edit"
+                >Edit HTML</button>
+                <button
+                  type="button"
+                  onClick={() => setMode("preview")}
+                  className={`overline text-[11px] px-4 py-2 ${mode === "preview" ? "bg-black text-[#FFD600]" : "bg-white"}`}
+                  data-testid="quote-mode-preview"
+                >Preview</button>
+              </div>
+              {mode === "edit" ? (
+                <textarea
+                  value={html}
+                  onChange={(e) => setHtml(e.target.value)}
+                  rows={14}
+                  className="w-full font-mono text-xs p-3 border-0 rounded-none focus:ring-0"
+                  data-testid="quote-email-html"
+                />
+              ) : (
+                <div className="p-4 bg-neutral-50 max-h-[400px] overflow-y-auto" data-testid="quote-email-preview" dangerouslySetInnerHTML={{ __html: html }} />
+              )}
+            </div>
+
+            <details className="text-xs">
+              <summary className="overline cursor-pointer">Plain-text fallback (optional)</summary>
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={4}
+                className="w-full mt-2 font-mono text-xs"
+                data-testid="quote-email-text"
+              />
+            </details>
+          </div>
+        )}
+
+        <DialogFooter className="p-5 border-t-2 border-black bg-neutral-50 flex flex-row justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="overline text-[11px] border-2 border-black px-4 py-2 bg-white hover:bg-neutral-100"
+            data-testid="quote-cancel-btn"
+          >Cancel</button>
+          <button
+            type="button"
+            onClick={send}
+            disabled={sending || loading || !subject.trim()}
+            className="overline text-[11px] border-2 border-black px-4 py-2 bg-[#FFD600] hover:bg-yellow-300 disabled:opacity-40 inline-flex items-center gap-2"
+            data-testid="quote-send-confirm-btn"
+          >
+            {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+            Send email
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
 
 function PortfolioEditor({ portfolio, refresh }) {
   const [title, setTitle] = useState("");

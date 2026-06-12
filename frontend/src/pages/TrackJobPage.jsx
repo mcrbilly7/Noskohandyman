@@ -102,8 +102,17 @@ export default function TrackJobPage() {
           </div>
           <div className="p-6 bg-[#F9FAFB]">
             <div className="overline">Quote</div>
-            <div className="font-display text-5xl tracking-tighter mt-1">${job.quoted_amount.toFixed(2)}</div>
-            <div className="overline mt-1">Final price · $50 visit minimum applies</div>
+            {job.quoted_amount != null && job.quote_status === "sent" ? (
+              <>
+                <div className="font-display text-5xl tracking-tighter mt-1" data-testid="track-quote-amount">${job.quoted_amount.toFixed(2)}</div>
+                <div className="overline mt-1">Final price · $50 visit minimum applies</div>
+              </>
+            ) : (
+              <>
+                <div className="font-display text-3xl tracking-tighter mt-1 text-neutral-700" data-testid="track-quote-pending">Pending quote</div>
+                <div className="text-sm mt-2 text-neutral-700">We're reviewing your photos and details. Expect an email with your custom quote within 24 hours.</div>
+              </>
+            )}
             {job.preferred_date && (
               <>
                 <div className="overline mt-4">Preferred time</div>

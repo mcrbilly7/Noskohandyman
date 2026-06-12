@@ -10,7 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional, Literal
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as date_cls
 import os
 import uuid
 import logging
@@ -100,6 +100,11 @@ def email_welcome(to: str, name: str):
 
 
 def email_quote_to_admin(job: dict):
+    quote_line = (
+        "<p><b>Quote status:</b> <span style=\"background:#FFD600;padding:2px 6px\">PENDING — set price in admin</span></p>"
+        if job.get('quoted_amount') in (None, 0)
+        else f"<p><b>Quoted:</b> ${job['quoted_amount']:.2f}</p>"
+    )
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
       <div style="background:#0A0A0A;color:#FFD600;padding:18px 24px">
@@ -111,7 +116,7 @@ def email_quote_to_admin(job: dict):
         <p><b>Service:</b> {job['service_type']}</p>
         <p><b>Address:</b> {job['address']}</p>
         <p><b>Description:</b><br>{job['description']}</p>
-        <p><b>Quoted:</b> ${job['quoted_amount']:.2f}</p>
+        {quote_line}
         {'<p><b>Referral:</b> ' + job['referral_code'] + '</p>' if job.get('referral_code') else ''}
         <p><b>Photos uploaded:</b> {len(job.get('photo_paths', []))}</p>
       </div>
@@ -120,7 +125,8 @@ def email_quote_to_admin(job: dict):
     send_email(COMPANY_EMAIL, f"New quote request — {job['customer_name']}", html)
 
 
-def email_quote_to_customer(job: dict, origin: Optional[str] = None):
+def email_request_received(job: dict, origin: Optional[str] = None):
+    """Sent right after a customer submits a request. No price — confirmation only."""
     track_url = f"{origin or 'https://nosko.com'}/track/{job['job_id']}"
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0A0A0A">
@@ -130,14 +136,51 @@ def email_quote_to_customer(job: dict, origin: Optional[str] = None):
       <div style="padding:24px;border:2px solid #0A0A0A;border-top:0">
         <p>Hey {job['customer_name']},</p>
         <p>We got your request <b>{job['job_id']}</b> for <b>{job['service_type']}</b> at {job['address']}.</p>
-        <p>A handyman from our DFW team will be in touch shortly.</p>
+        <p>We'll review the photos and details, then email you a custom quote — usually within 24 hours.</p>
         <p style="margin:24px 0"><a href="{track_url}" style="background:#0A0A0A;color:#FFD600;padding:12px 20px;text-decoration:none;border:2px solid #0A0A0A;display:inline-block">TRACK YOUR JOB</a></p>
         <p style="font-size:12px;color:#666">No login needed. Bookmark the link to check status anytime.</p>
         <p>— Nosko Handyman · {COMPANY_EMAIL}</p>
       </div>
     </div>
     """
-    send_email(job['customer_email'], "Your Nosko quote request", html)
+    send_email(job['customer_email'], "We got your Nosko quote request", html)
+
+
+def build_quote_email_template(job: dict, amount: float, origin: Optional[str] = None) -> dict:
+    """Return default subject + html + text the admin can edit before sending."""
+    track_url = f"{origin or 'https://nosko.com'}/track/{job['job_id']}"
+    first = (job.get('customer_name') or '').split(' ')[0] or 'there'
+    pref = ''
+    if job.get('preferred_date'):
+        pref = f"<p>Your requested time — <b>{job['preferred_date']} ({job.get('preferred_time_slot') or 'flexible'})</b> — is held for you. Confirm and we'll lock it in.</p>"
+    subject = f"Your Nosko quote — Job {job['job_id']}"
+    html = f"""<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0A0A0A">
+  <div style="background:#FFD600;padding:18px 24px;border:2px solid #0A0A0A">
+    <h1 style="margin:0;font-size:24px">YOUR QUOTE</h1>
+  </div>
+  <div style="padding:24px;border:2px solid #0A0A0A;border-top:0">
+    <p>Hi {first},</p>
+    <p>Thanks for sending over your <b>{job.get('service_type','handyman')}</b> request at {job.get('address','')}.</p>
+    <p>Here's our quote for the work:</p>
+    <div style="background:#0A0A0A;color:#FFD600;padding:18px 24px;margin:18px 0;text-align:center">
+      <div style="font-size:12px;letter-spacing:2px">TOTAL QUOTE</div>
+      <div style="font-size:42px;font-weight:bold;letter-spacing:-1px">${amount:.2f}</div>
+    </div>
+    <p>This is a fixed price covering labor. Parts (if any) are itemized separately. $50 visit minimum applies.</p>
+    {pref}
+    <p>Reply to this email to accept, or click below to view your job status:</p>
+    <p style="margin:24px 0"><a href="{track_url}" style="background:#0A0A0A;color:#FFD600;padding:12px 20px;text-decoration:none;border:2px solid #0A0A0A;display:inline-block">VIEW JOB</a></p>
+    <p>— Nosson · Nosko Handyman<br>{COMPANY_EMAIL}</p>
+  </div>
+</div>"""
+    text = (
+        f"Hi {first},\n\n"
+        f"Thanks for sending over your {job.get('service_type','handyman')} request at {job.get('address','')}.\n\n"
+        f"Quote: ${amount:.2f}\n\n"
+        f"Reply to accept, or view your job: {track_url}\n\n"
+        f"— Nosson · Nosko Handyman\n{COMPANY_EMAIL}"
+    )
+    return {"subject": subject, "html": html, "text": text}
 
 
 def email_reset_link(to: str, name: str, link: str):
@@ -701,17 +744,18 @@ async def create_job(payload: dict, request: Request):
         ref = await db.users.find_one({"referral_code": referral_code}, {"_id": 0})
         if not ref:
             referral_code = None
-    # Reject job if preferred_date is on a blocked day
+    # Reject job if preferred_date is on a blocked day OR a blocked weekday
     pdate = (payload.get("preferred_date") or "").strip() or None
     if pdate:
-        avail = await db.availability.find_one({"key": "default"}, {"_id": 0, "blocked_dates": 1})
-        blocked = (avail or {}).get("blocked_dates", [])
-        if pdate in blocked:
+        avail = await db.availability.find_one({"key": "default"}, {"_id": 0, "blocked_dates": 1, "blocked_weekdays": 1})
+        blocked_dates = (avail or {}).get("blocked_dates", [])
+        blocked_weekdays = (avail or {}).get("blocked_weekdays", [])
+        if pdate in blocked_dates:
             raise HTTPException(400, "Selected date is unavailable. Please pick another day.")
-    settings_doc = await db.site_settings.find_one({"key": "default"}, {"_id": 0, "key": 0})
-    minimum = float((settings_doc or {}).get("minimum_charge", 50.0))
+        wlabel = _date_weekday_label(pdate)
+        if wlabel and wlabel in blocked_weekdays:
+            raise HTTPException(400, "We don't work on that day of the week. Please pick another day.")
     service_type = payload.get("service_type", "General Handyman")
-    quoted = max(float(payload.get("quoted_amount") or minimum), minimum)
     job = {
         "job_id": f"job_{uuid.uuid4().hex[:10]}",
         "customer_name": payload["customer_name"],
@@ -724,7 +768,9 @@ async def create_job(payload: dict, request: Request):
         "referral_code": referral_code,
         "preferred_date": payload.get("preferred_date"),
         "preferred_time_slot": payload.get("preferred_time_slot"),
-        "quoted_amount": quoted,
+        "quoted_amount": None,
+        "quote_status": "pending",   # pending -> sent -> (accepted/declined later)
+        "quote_sent_at": None,
         "status": "new",
         "assigned_worker_id": None,
         "created_at": now,
@@ -735,7 +781,7 @@ async def create_job(payload: dict, request: Request):
     try:
         email_quote_to_admin(job)
         origin = payload.get("origin") or request.headers.get("origin") or str(request.base_url).rstrip("/")
-        email_quote_to_customer(job, origin)
+        email_request_received(job, origin)
     except Exception as e:
         logger.error(f"Email dispatch failed for {job['job_id']}: {e}")
     return job
@@ -789,13 +835,88 @@ async def track_job(job_id: str):
         "address": job["address"],
         "status": job["status"],
         "eta_message": eta_map.get(job["status"], ""),
-        "quoted_amount": job["quoted_amount"],
+        "quoted_amount": job.get("quoted_amount"),
+        "quote_status": job.get("quote_status", "pending" if job.get("quoted_amount") in (None, 0) else "sent"),
+        "quote_sent_at": job.get("quote_sent_at"),
         "assigned_worker_name": worker_name,
         "preferred_date": job.get("preferred_date"),
         "preferred_time_slot": job.get("preferred_time_slot"),
         "created_at": job["created_at"],
         "photo_paths": job.get("photo_paths", []),
     }
+
+
+@api.put("/jobs/{job_id}/quote")
+async def save_quote(job_id: str, payload: dict, _: dict = Depends(require_admin)):
+    """Admin saves/updates the quote amount (without sending the email)."""
+    try:
+        amount = float(payload.get("quoted_amount"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "quoted_amount (number) required")
+    if amount < 0:
+        raise HTTPException(400, "Amount must be non-negative")
+    res = await db.jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "quoted_amount": round(amount, 2),
+            "quote_status": "draft",
+        }},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Job not found")
+    job = await db.jobs.find_one({"job_id": job_id}, {"_id": 0})
+    return job
+
+
+@api.post("/jobs/{job_id}/quote-preview")
+async def preview_quote_email(job_id: str, payload: dict, request: Request, _: dict = Depends(require_admin)):
+    """Return a pre-filled subject + HTML the admin can edit before sending."""
+    try:
+        amount = float(payload.get("quoted_amount"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "quoted_amount (number) required")
+    job = await db.jobs.find_one({"job_id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(404, "Job not found")
+    origin = payload.get("origin") or request.headers.get("origin") or str(request.base_url).rstrip("/")
+    return build_quote_email_template(job, amount, origin)
+
+
+@api.post("/jobs/{job_id}/send-quote")
+async def send_quote(job_id: str, payload: dict, request: Request, _: dict = Depends(require_admin)):
+    """Send the customer the quote email (admin can override subject/html/text)."""
+    try:
+        amount = float(payload.get("quoted_amount"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "quoted_amount (number) required")
+    if amount < 0:
+        raise HTTPException(400, "Amount must be non-negative")
+    job = await db.jobs.find_one({"job_id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    origin = payload.get("origin") or request.headers.get("origin") or str(request.base_url).rstrip("/")
+    template = build_quote_email_template(job, amount, origin)
+    subject = (payload.get("subject") or template["subject"]).strip()
+    html = payload.get("html") or template["html"]
+    text = payload.get("text") or template["text"]
+
+    sent_ok = send_email(job["customer_email"], subject, html, text)
+    if not sent_ok:
+        raise HTTPException(502, "Email send failed — check SMTP credentials.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "quoted_amount": round(amount, 2),
+            "quote_status": "sent",
+            "quote_sent_at": now,
+            "last_quote_subject": subject,
+            "last_quote_html": html,
+        }},
+    )
+    return {"ok": True, "quote_sent_at": now, "to": job["customer_email"]}
 
 
 async def _auto_payout_on_complete(job: dict, admin_user: dict):
@@ -1158,26 +1279,44 @@ async def admin_stats(_: dict = Depends(require_admin)):
 
 
 # -------------------- Availability blocking --------------------
+WEEKDAY_LABELS_PY = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # Python weekday() order
+
+
+def _date_weekday_label(d: str) -> Optional[str]:
+    try:
+        y, m, day = (int(x) for x in d.split("-"))
+        return WEEKDAY_LABELS_PY[date_cls(y, m, day).weekday()]
+    except Exception:
+        return None
+
+
 @api.get("/availability")
 async def get_availability():
-    """Public: returns the list of YYYY-MM-DD dates the owner is unavailable."""
+    """Public: returns blocked specific dates AND blocked weekdays."""
     doc = await db.availability.find_one({"key": "default"}, {"_id": 0, "key": 0})
-    return {"blocked_dates": (doc or {}).get("blocked_dates", [])}
+    return {
+        "blocked_dates": (doc or {}).get("blocked_dates", []),
+        "blocked_weekdays": (doc or {}).get("blocked_weekdays", []),
+    }
 
 
 @api.put("/availability")
 async def set_availability(payload: dict, _: dict = Depends(require_admin)):
-    """Admin: replace the full set of blocked dates. Accepts {"blocked_dates": ["YYYY-MM-DD", ...]}."""
-    dates = payload.get("blocked_dates", [])
-    if not isinstance(dates, list):
-        raise HTTPException(400, "blocked_dates must be a list")
-    cleaned = sorted({str(d).strip() for d in dates if isinstance(d, str) and len(d.strip()) == 10})
-    await db.availability.update_one(
-        {"key": "default"},
-        {"$set": {"key": "default", "blocked_dates": cleaned, "updated_at": datetime.now(timezone.utc).isoformat()}},
-        upsert=True,
-    )
-    return {"blocked_dates": cleaned}
+    """Admin: replace blocked_dates and/or blocked_weekdays."""
+    update = {"updated_at": datetime.now(timezone.utc).isoformat(), "key": "default"}
+    if "blocked_dates" in payload:
+        dates = payload.get("blocked_dates") or []
+        if not isinstance(dates, list):
+            raise HTTPException(400, "blocked_dates must be a list")
+        update["blocked_dates"] = sorted({str(d).strip() for d in dates if isinstance(d, str) and len(d.strip()) == 10})
+    if "blocked_weekdays" in payload:
+        wdays = payload.get("blocked_weekdays") or []
+        if not isinstance(wdays, list):
+            raise HTTPException(400, "blocked_weekdays must be a list")
+        allowed = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
+        update["blocked_weekdays"] = sorted({str(w).lower().strip() for w in wdays if isinstance(w, str) and str(w).lower().strip() in allowed})
+    await db.availability.update_one({"key": "default"}, {"$set": update}, upsert=True)
+    return await get_availability()
 
 
 # -------------------- App wiring --------------------

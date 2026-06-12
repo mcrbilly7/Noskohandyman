@@ -26,6 +26,8 @@ const SERVICE_OPTIONS = [
   "Other",
 ];
 
+const JS_DOW_TO_LABEL = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
 function fmtDate(d) {
   if (!d) return "";
   const y = d.getFullYear();
@@ -41,6 +43,7 @@ export default function JobRequestPage() {
   const [date, setDate] = useState(null);
   const [slot, setSlot] = useState("flexible");
   const [blockedSet, setBlockedSet] = useState(new Set());
+  const [blockedWeekdays, setBlockedWeekdays] = useState(new Set());
   const [form, setForm] = useState({
     customer_name: "",
     customer_email: "",
@@ -53,6 +56,7 @@ export default function JobRequestPage() {
   useEffect(() => {
     api.get("/availability").then((r) => {
       setBlockedSet(new Set(r.data?.blocked_dates || []));
+      setBlockedWeekdays(new Set(r.data?.blocked_weekdays || []));
     }).catch(() => {});
   }, []);
 
@@ -168,12 +172,13 @@ export default function JobRequestPage() {
                     mode="single"
                     selected={date}
                     onSelect={setDate}
-                    disabled={(d) => d < today || blockedSet.has(fmtDate(d))}
+                    disabled={(d) => d < today || blockedSet.has(fmtDate(d)) || blockedWeekdays.has(JS_DOW_TO_LABEL[d.getDay()])}
                     data-testid="job-calendar"
                   />
-                  {blockedSet.size > 0 && (
+                  {(blockedSet.size > 0 || blockedWeekdays.size > 0) && (
                     <div className="px-3 py-2 border-t border-black overline text-[10px] text-neutral-600">
-                      {blockedSet.size} day{blockedSet.size === 1 ? "" : "s"} unavailable
+                      {blockedWeekdays.size > 0 && <>Off: {[...blockedWeekdays].join(", ").toUpperCase()} · </>}
+                      {blockedSet.size} specific day{blockedSet.size === 1 ? "" : "s"} blocked
                     </div>
                   )}
                 </div>
