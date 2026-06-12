@@ -133,10 +133,10 @@ class TestSaveQuote:
         body = r.json()
         assert body["quoted_amount"] == 175.50
         assert body["quote_status"] == "draft"
-        # Verify persistence
+        # Public track endpoint must NOT leak the draft price (only 'sent' quotes go public)
         g = requests.get(f"{API}/jobs/track/{fresh_job['job_id']}", timeout=10)
         assert g.status_code == 200
-        assert g.json()["quoted_amount"] == 175.50
+        assert g.json()["quoted_amount"] is None
         assert g.json()["quote_status"] == "draft"
 
     def test_save_quote_invalid_amount(self, fresh_job, admin_headers):

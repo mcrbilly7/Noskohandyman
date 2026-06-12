@@ -1,42 +1,52 @@
-# Nosko Handyman — PRD (Iter 7)
+# Nosko Handyman — PRD
 
-## Iter 7 changes
-- **CORS hardened** for cross-origin credentialed requests. The old config used `allow_origins=["*"]` with `allow_credentials=True` — browsers reject that combo for any origin that wasn't already cached. Now uses `allow_origin_regex=".*"` so the server echoes back the request origin (works for noskotx.com from any device).
-- **Owner availability schedule**:
-  - `GET /api/availability` (public) — returns `{blocked_dates: [YYYY-MM-DD]}`.
-  - `PUT /api/availability` (admin) — replaces full set.
-  - Admin Dashboard new **Schedule** tab with 2-month calendar; click any future day to toggle blocked (red-strike). Blocked count + clear-all sidebar.
-  - Customer quote calendar (on `/request`) loads blocked dates and disables them (unclickable).
-  - `POST /api/jobs` server-side guard: rejects with 400 if `preferred_date` is in blocked list (defense in depth).
-- **Service tile cover images**:
-  - Each `services[]` entry on site_settings supports `image_path`.
-  - Admin "Edit website" → Services tiles: per-tile FileUploader for cover image (140px slot).
-  - Landing page renders 4:3 cover image at top of each service tile when set.
-- **Admin sidebar cleaned**: removed Workers/Marketers/Jobs/Portfolio links (those are tabs inside Command center now). Sidebar shows: Command center · My account.
+## Product overview
+Solo-handyman web app for Nosko (DFW). Customers submit quote requests with photos + preferred schedule. **Admin sets the price manually** and clicks **Send Quote** to email the customer (with editable subject + HTML). Customers track their job at `/track/:jobId` without logging in.
+
+## Iter 8 changes (June 12, 2026) — Manual quoting
+- **Removed auto-pricing**: `POST /api/jobs` now creates jobs with `quoted_amount = null` and `quote_status = "pending"`. No more $50 floor stamped at creation.
+- **3 new admin endpoints**:
+  - `PUT /api/jobs/{job_id}/quote` — saves price, sets `quote_status = "draft"` (visible to admin only, NOT exposed publicly).
+  - `POST /api/jobs/{job_id}/quote-preview` — returns `{subject, html, text}` populated with customer name, job_id, amount; admin can edit before sending.
+  - `POST /api/jobs/{job_id}/send-quote` — sends the email (with admin-edited subject/html), sets `quote_status = "sent"` + `quote_sent_at`. Only 'sent' quotes are exposed on `/api/jobs/track/{id}`.
+- **Track page hardened**: returns `quoted_amount = null` and `quote_status = "pending"|"draft"` until admin explicitly sends. Customer never sees a draft price.
+- **Admin Dashboard Quote requests tab**: each job row now has:
+  - `$` price input (`data-testid="quote-input-{job_id}"`)
+  - "Save price" button (saves as draft)
+  - "Send quote" button → opens modal with editable Subject + HTML editor + Preview tab + plain-text fallback. Confirm → emails customer + flips status to SENT (green badge with date).
+- **TrackJobPage**: shows "Pending quote" until `quote_status === "sent"`.
+- **Confirmation email rewrite**: post-submission email now says "we'll email you a custom quote within 24 hours" instead of pretending the request is already priced.
 
 ## Test status
-- **95/95 backend tests pass** (81 prior + 14 new iter7). See `/app/test_reports/`.
-- Lint warnings about pre-existing apostrophe-escapes/old hooks are not regressions; new file `AvailabilityEditor.jsx` is clean.
+- 16/16 backend pytest pass (`backend/tests/test_quote_flow.py`) — covers create/track/save/preview/send + auth-required negatives + 404s + validation.
+- Frontend e2e verified by testing_agent_v3_fork (iteration_4): admin login → set price → save → send-quote modal → edit HTML → confirm → SENT badge → /track shows amount.
 
-## Cumulative current feature set
+## Cumulative feature set
 - Editable solo-handyman marketing site (Hero / Services with covers / How / Portfolio / Final CTA / Footer)
-- Anonymous quote request with photo upload + calendar (blocked days disabled) + time-slot picker
-- Public job tracking page `/track/:jobId`
+- Anonymous quote request with photo upload + calendar (blocked days + blocked weekdays) + time-slot picker
+- **Manual admin quoting workflow** (set price → edit email → send) [NEW]
+- Public job tracking page `/track/:jobId` (price only shown after admin sends quote)
 - Hybrid auth (Google OAuth + email/password + forgot/reset)
 - Founding admins: noskotx@gmail.com, nossonkosowsky32@gmail.com
-- Admin tabs: Quote requests · **Schedule** · Team · Portfolio · Edit website
+- Admin tabs: Quote requests · Schedule · Team · Portfolio · Edit website
 - Per-user account settings (name / phone / location / notify_email / password)
-- Real Gmail SMTP emails (welcome, quote, reset, track link)
-- Stripe Connect + auto-payouts logic dormant in backend
+- Real Gmail SMTP emails (welcome, request-received confirmation, custom quote email, reset)
+- Stripe Connect + auto-payouts logic dormant in backend (kept for possible re-pivot)
 
 ## Owner action for production
-1. **Redeploy** to push iter7 (CORS fix + availability + service covers + sidebar cleanup) to https://noskotx.com. The CORS fix is the critical one for "doesn't work on other devices".
-2. After redeploy, ask a friend to test on a fresh device — submitting a quote should work without sign-in.
-3. If still broken after redeploy: contact Emergent Support — production ingress may need its own CORS allow.
+1. **Redeploy** to push iter8 (manual quoting) to https://noskotx.com.
+2. Submit a test request from a different browser → check admin dashboard, enter a price, click Send Quote → verify the email lands in customer inbox.
 
 ## Backlog
-- P1: Move SMTP to BackgroundTasks
-- P1: Pydantic request models on POST endpoints
-- P2: SMS via Twilio
-- P2: Calendar export (ICS) of upcoming jobs for the owner
-- P2: Customer-facing "edit my scheduled time" via track page
+- **P0 carry-over**: Landing page infinite-loading bug when portfolio/service images present — needs reproduction. Likely a silent API failure in `/portfolio` or `/site/settings` keeping the page hung.
+- **P1**: Mobile responsiveness audit (LandingPage, AdminDashboard settings tab, JobRequestPage).
+- **P1**: Move SMTP to BackgroundTasks (non-blocking).
+- **P1**: Pydantic request models on POST endpoints.
+- **P2**: Add Accept/Decline buttons on customer track page once quote is sent (customer can confirm or counter).
+- **P2**: Split `server.py` (~1400 lines) into routers (auth, jobs, quotes, admin, settings).
+- **P2**: SMS via Twilio.
+- **P2**: Calendar export (ICS) of upcoming jobs.
+
+## Architecture
+- `frontend/` React + Tailwind + Shadcn UI. Pages in `src/pages/`, shared components in `src/components/shared/`.
+- `backend/` FastAPI + Motor (MongoDB). Single `server.py` (target split: routers). Emergent object storage for uploads. Gmail SMTP for emails.

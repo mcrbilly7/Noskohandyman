@@ -828,6 +828,9 @@ async def track_job(job_id: str):
         "completed": "Completed. Hope it went great!",
         "cancelled": "Cancelled.",
     }
+    quote_status = job.get("quote_status", "sent" if job.get("quoted_amount") not in (None, 0) else "pending")
+    # Only expose price after admin explicitly sends the quote email
+    public_quote = job.get("quoted_amount") if quote_status == "sent" else None
     return {
         "job_id": job["job_id"],
         "customer_name": job["customer_name"],
@@ -835,8 +838,8 @@ async def track_job(job_id: str):
         "address": job["address"],
         "status": job["status"],
         "eta_message": eta_map.get(job["status"], ""),
-        "quoted_amount": job.get("quoted_amount"),
-        "quote_status": job.get("quote_status", "pending" if job.get("quoted_amount") in (None, 0) else "sent"),
+        "quoted_amount": public_quote,
+        "quote_status": quote_status,
         "quote_sent_at": job.get("quote_sent_at"),
         "assigned_worker_name": worker_name,
         "preferred_date": job.get("preferred_date"),
