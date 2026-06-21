@@ -782,7 +782,8 @@ async def create_job(payload: dict, request: Request):
         "photo_paths": payload.get("photo_paths", []),
         "referral_code": referral_code,
         "preferred_date": payload.get("preferred_date"),
-        "preferred_time_slot": payload.get("preferred_time_slot"),
+        "preferred_time": payload.get("preferred_time"),  # NEW: "HH:MM" exact
+        "preferred_time_slot": payload.get("preferred_time_slot"),  # legacy fallback
         "promo_code": promo_code,
         "promo_meta": promo_meta,
         "quoted_amount": None,
@@ -790,6 +791,13 @@ async def create_job(payload: dict, request: Request):
         "quote_sent_at": None,
         "quote_line_items": [],
         "quote_template_id": None,
+        # Scheduling state machine
+        "schedule_status": "pending",  # pending | proposed_by_admin | countered_by_customer | agreed | declined
+        "proposed_time": None,         # admin's proposed exact "YYYY-MM-DD HH:MM"
+        "customer_counter_time": None, # customer's counter "YYYY-MM-DD HH:MM"
+        "customer_counter_note": None,
+        "scheduled_time": None,        # final agreed time
+        "schedule_history": [],        # list of {at, by, action, time?, note?}
         "status": "new",
         "assigned_worker_id": None,
         "created_at": now,
@@ -862,7 +870,14 @@ async def track_job(job_id: str):
         "quote_sent_at": job.get("quote_sent_at"),
         "assigned_worker_name": worker_name,
         "preferred_date": job.get("preferred_date"),
+        "preferred_time": job.get("preferred_time"),
         "preferred_time_slot": job.get("preferred_time_slot"),
+        "schedule_status": job.get("schedule_status", "pending"),
+        "proposed_time": job.get("proposed_time"),
+        "customer_counter_time": job.get("customer_counter_time"),
+        "customer_counter_note": job.get("customer_counter_note"),
+        "scheduled_time": job.get("scheduled_time"),
+        "schedule_history": job.get("schedule_history", []),
         "created_at": job["created_at"],
         "photo_paths": job.get("photo_paths", []),
     }
@@ -967,6 +982,18 @@ async def send_quote(job_id: str, payload: dict, request: Request, _: dict = Dep
         raise HTTPException(502, "Email send failed — check SMTP credentials.")
 
     now = datetime.now(timezone.utc).isoformat()
+    # Schedule: admin proposes a time alongside the quote. Defaults to customer's preferred if not supplied.
+    proposed_time = (payload.get("proposed_time") or "").strip() or None
+    if not proposed_time:
+        cd = job.get("preferred_date")
+        ct = job.get("preferred_time")
+        if cd and ct:
+            proposed_time = f"{cd} {ct}"
+    history = job.get("schedule_history", []) or []
+    history.append({
+        "at": now, "by": "admin", "action": "proposed",
+        "time": proposed_time, "note": payload.get("schedule_note") or None,
+    })
     set_doc = {
         "quoted_amount": round(amount, 2),
         "quote_status": "sent",
@@ -975,6 +1002,9 @@ async def send_quote(job_id: str, payload: dict, request: Request, _: dict = Dep
         "last_quote_html": html,
         "quote_line_items": line_items,
         "quote_template_id": template_id,
+        "schedule_status": "proposed_by_admin",
+        "proposed_time": proposed_time,
+        "schedule_history": history,
     }
     await db.jobs.update_one({"job_id": job_id}, {"$set": set_doc})
 
@@ -984,7 +1014,175 @@ async def send_quote(job_id: str, payload: dict, request: Request, _: dict = Dep
             {"code_id": job["promo_meta"]["code_id"], "used_at": None},
             {"$set": {"used_at": now, "used_on_job_id": job_id}},
         )
-    return {"ok": True, "quote_sent_at": now, "to": job["customer_email"]}
+    return {"ok": True, "quote_sent_at": now, "to": job["customer_email"], "proposed_time": proposed_time}
+
+
+# -------------------- Scheduling: Accept / Decline / Counter --------------------
+def _fmt_dt_human(s: Optional[str]) -> str:
+    if not s:
+        return "TBD"
+    return s.replace("T", " ")[:16]
+
+
+def _email_schedule_to_admin(job: dict, action: str, time_str: Optional[str], note: Optional[str]):
+    """Email Nosson when customer accepts/declines/counters the quote."""
+    color = {"accepted": "#16A34A", "declined": "#DC2626", "countered": "#F59E0B"}.get(action, "#0A0A0A")
+    label = {"accepted": "ACCEPTED", "declined": "DECLINED", "countered": "COUNTERED"}.get(action, action.upper())
+    extra = ""
+    if action == "countered" and time_str:
+        extra = f"<p><b>Customer wants:</b> {_fmt_dt_human(time_str)}</p>"
+    if note:
+        extra += f"<p><b>Note:</b> {note}</p>"
+    html = f"""<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0A0A0A">
+  <div style="background:{color};color:white;padding:18px 24px">
+    <h1 style="margin:0;font-size:22px">{label} — {job.get('customer_name','Customer')}</h1>
+  </div>
+  <div style="padding:18px 24px;border:2px solid {color};border-top:0">
+    <p>Job <b>{job['job_id']}</b> · {job.get('service_type','')}</p>
+    <p><b>Quoted:</b> ${(job.get('quoted_amount') or 0):.2f}</p>
+    <p><b>Your proposed time:</b> {_fmt_dt_human(job.get('proposed_time'))}</p>
+    {extra}
+    <p>Open the admin dashboard to respond.</p>
+  </div>
+</div>"""
+    send_email(COMPANY_EMAIL, f"Job {job['job_id']} — quote {label.lower()}", html)
+
+
+def _email_schedule_to_customer(job: dict, action: str, time_str: Optional[str], note: Optional[str], origin: Optional[str] = None):
+    """Email the customer when admin agrees / counters / declines."""
+    track_url = f"{origin or 'https://nosko.com'}/track/{job['job_id']}"
+    color = {"agreed": "#16A34A", "declined": "#DC2626", "counter": "#F59E0B"}.get(action, "#0A0A0A")
+    if action == "agreed":
+        title, body = "BOOKING CONFIRMED", f"<p>You're locked in for <b>{_fmt_dt_human(time_str)}</b>.</p>"
+    elif action == "declined":
+        title, body = "WE CAN'T MAKE THAT WORK", "<p>Sorry — that time/scope isn't workable on our end. Reply if you'd like to find another option.</p>"
+    else:
+        title, body = "NEW TIME PROPOSAL", f"<p>Nosson can do <b>{_fmt_dt_human(time_str)}</b> instead. Open the link below to accept, decline, or counter.</p>"
+    if note:
+        body += f"<p style='background:#FFF7CD;padding:8px 12px;border-left:3px solid #F59E0B'>Note from Nosson: {note}</p>"
+    html = f"""<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0A0A0A">
+  <div style="background:{color};color:white;padding:18px 24px;border:2px solid #0A0A0A">
+    <h1 style="margin:0;font-size:22px">{title}</h1>
+  </div>
+  <div style="padding:18px 24px;border:2px solid #0A0A0A;border-top:0">
+    <p>Hi {(job.get('customer_name') or '').split(' ')[0] or 'there'},</p>
+    {body}
+    <p style="margin:20px 0"><a href="{track_url}" style="background:#0A0A0A;color:#FFD600;padding:12px 20px;text-decoration:none;border:2px solid #0A0A0A;display:inline-block">VIEW JOB</a></p>
+    <p>— Nosko Handyman</p>
+  </div>
+</div>"""
+    subject_map = {"agreed": "Booking confirmed", "declined": "About your Nosko quote", "counter": "New time proposal"}
+    send_email(job["customer_email"], subject_map.get(action, "Update on your job"), html)
+
+
+@api.post("/jobs/track/{job_id}/respond")
+async def customer_respond(job_id: str, payload: dict, request: Request):
+    """Anonymous public endpoint — customer accepts / declines / counters from the track page."""
+    action = (payload.get("action") or "").strip().lower()
+    if action not in ("accept", "decline", "counter"):
+        raise HTTPException(400, "action must be accept|decline|counter")
+    job = await db.jobs.find_one({"job_id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(404, "Job not found")
+    # Only allow response if quote has been sent and the back-and-forth isn't already settled.
+    if job.get("schedule_status") in (None, "pending"):
+        raise HTTPException(400, "Quote has not been sent yet")
+    if job.get("schedule_status") in ("agreed", "declined"):
+        raise HTTPException(400, "This booking is already settled")
+
+    now = datetime.now(timezone.utc).isoformat()
+    history = job.get("schedule_history", []) or []
+    note = (payload.get("note") or "").strip() or None
+    set_doc = {"schedule_history": history}
+
+    if action == "accept":
+        agreed_time = job.get("proposed_time")
+        set_doc.update({
+            "schedule_status": "agreed",
+            "scheduled_time": agreed_time,
+            "customer_counter_time": None,
+            "customer_counter_note": note,
+        })
+        history.append({"at": now, "by": "customer", "action": "accepted", "time": agreed_time, "note": note})
+    elif action == "decline":
+        set_doc.update({"schedule_status": "declined", "customer_counter_note": note})
+        history.append({"at": now, "by": "customer", "action": "declined", "note": note})
+    else:  # counter
+        ct = (payload.get("counter_time") or "").strip()
+        if not ct:
+            raise HTTPException(400, "counter_time (YYYY-MM-DD HH:MM) required")
+        set_doc.update({
+            "schedule_status": "countered_by_customer",
+            "customer_counter_time": ct,
+            "customer_counter_note": note,
+        })
+        history.append({"at": now, "by": "customer", "action": "countered", "time": ct, "note": note})
+
+    await db.jobs.update_one({"job_id": job_id}, {"$set": set_doc})
+    updated = await db.jobs.find_one({"job_id": job_id}, {"_id": 0})
+    try:
+        _email_schedule_to_admin(updated, action + "ed" if action != "counter" else "countered", set_doc.get("customer_counter_time"), note)
+    except Exception as e:
+        logger.error(f"Schedule-to-admin email failed: {e}")
+    return {"ok": True, "schedule_status": set_doc["schedule_status"], "scheduled_time": set_doc.get("scheduled_time")}
+
+
+@api.post("/jobs/{job_id}/respond-counter")
+async def admin_respond_counter(job_id: str, payload: dict, request: Request, _: dict = Depends(require_admin)):
+    """Admin reacts to customer counter: agree | counter (with new time) | decline."""
+    action = (payload.get("action") or "").strip().lower()
+    if action not in ("agree", "counter", "decline"):
+        raise HTTPException(400, "action must be agree|counter|decline")
+    job = await db.jobs.find_one({"job_id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    history = job.get("schedule_history", []) or []
+    note = (payload.get("note") or "").strip() or None
+    origin = payload.get("origin") or request.headers.get("origin") or str(request.base_url).rstrip("/")
+
+    if action == "agree":
+        agreed = job.get("customer_counter_time") or job.get("proposed_time")
+        if not agreed:
+            raise HTTPException(400, "No customer counter time to agree to")
+        set_doc = {"schedule_status": "agreed", "scheduled_time": agreed}
+        history.append({"at": now, "by": "admin", "action": "agreed", "time": agreed, "note": note})
+        await db.jobs.update_one({"job_id": job_id}, {"$set": {**set_doc, "schedule_history": history}})
+        try:
+            _email_schedule_to_customer(job, "agreed", agreed, note, origin)
+        except Exception as e:
+            logger.error(f"Customer agree email failed: {e}")
+        return {"ok": True, "scheduled_time": agreed, "schedule_status": "agreed"}
+
+    if action == "decline":
+        history.append({"at": now, "by": "admin", "action": "declined", "note": note})
+        await db.jobs.update_one({"job_id": job_id}, {"$set": {"schedule_status": "declined", "schedule_history": history}})
+        try:
+            _email_schedule_to_customer(job, "declined", None, note, origin)
+        except Exception as e:
+            logger.error(f"Customer decline email failed: {e}")
+        return {"ok": True, "schedule_status": "declined"}
+
+    # counter
+    new_time = (payload.get("proposed_time") or "").strip()
+    if not new_time:
+        raise HTTPException(400, "proposed_time (YYYY-MM-DD HH:MM) required")
+    history.append({"at": now, "by": "admin", "action": "countered", "time": new_time, "note": note})
+    await db.jobs.update_one({"job_id": job_id}, {"$set": {
+        "schedule_status": "proposed_by_admin",
+        "proposed_time": new_time,
+        "customer_counter_time": None,
+        "customer_counter_note": None,
+        "schedule_history": history,
+    }})
+    try:
+        _email_schedule_to_customer(job, "counter", new_time, note, origin)
+    except Exception as e:
+        logger.error(f"Customer counter email failed: {e}")
+    return {"ok": True, "proposed_time": new_time, "schedule_status": "proposed_by_admin"}
+
+
 
 
 async def _auto_payout_on_complete(job: dict, admin_user: dict):
@@ -1651,6 +1849,13 @@ def _template_vars_for_job(job: dict, amount: float, origin: Optional[str], line
             f"<div style='background:#FFD600;border:2px solid #000;padding:10px 14px;margin:8px 0;font-size:14px'>"
             f"Promo applied · <b>{discount.get('code','')}</b> · {discount.get('percent_off',0)}% off</div>"
         )
+    # Proposed time line
+    pt = job.get("proposed_time")
+    if not pt:
+        cd, ct = job.get("preferred_date"), job.get("preferred_time")
+        if cd and ct:
+            pt = f"{cd} {ct}"
+    pt_label = pt or job.get("preferred_date") or "your preferred"
     return {
         "job_id": job["job_id"],
         "customer_name": job.get("customer_name", ""),
@@ -1658,7 +1863,8 @@ def _template_vars_for_job(job: dict, amount: float, origin: Optional[str], line
         "service_type": job.get("service_type", "handyman"),
         "address": job.get("address", ""),
         "amount": f"{amount:.2f}",
-        "preferred_date": job.get("preferred_date") or "your preferred",
+        "preferred_date": pt_label,
+        "proposed_time": pt or "",
         "track_url": track_url,
         "contact_email": COMPANY_EMAIL,
         "breakdown_block": breakdown_html,
